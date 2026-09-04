@@ -1512,6 +1512,54 @@ function migrateAssignedPMs(s){
   });
   return s;
 }
+// Migration: the old "Projected Costs" sub-tab (state.projectedCosts) was a
+// leftover duplicate of what "Budget and Costs" (state.greenSheets) does
+// better — same budget-vs-invoiced-by-cost-code idea, just older, and it
+// never got removed after Budget and Costs shipped. Now that the sub-tab and
+// all its UI/reducer code are gone, fold any legacy rows into greenSheets so
+// nothing already keyed in is lost: each old entry becomes one Green Sheet
+// budget line (system defaults to its description/cost-code label, budget
+// and cost code carried over, supplier noted in `notes` since Green Sheet
+// rows have no supplier field of their own), and any attachments move onto
+// that job's contractDocs as "Green Sheet" documents (no longer tied to one
+// specific budget row, just filed under the job). Called right after `state`
+// is (re)assigned at the same three points as migrateAssignedPMs above —
+// initial boot, a 409-conflict reload, and the background poll — so it
+// always runs against the current global `state` (nextId below reads off
+// that), not a not-yet-assigned local copy. state.projectedCosts is cleared
+// at the end so re-running it is harmless. Unlike the assignedPMs rename,
+// this one actually moves data between arrays rather than just renaming a
+// field, so it must reach the server or the next load would just see the
+// old unmigrated projectedCosts again and redo it — it returns true when it
+// migrated anything so each call site can make sure a save actually happens
+// (boot forces one; the 409 handler already schedules one; the poll
+// schedules one only when it just did real migration work).
+function migrateProjectedCosts(){
+  const legacy = state.projectedCosts || [];
+  if(!legacy.length) return false;
+  legacy.forEach(entry=>{
+    const greenSheetEntry = {
+      id: nextId('greenSheets', entry.jobId, 'GRN'), jobId: entry.jobId,
+      system: entry.description || costCodeLabel(entry.costCode) || entry.costCode || 'Migrated budget line',
+      scope: '',
+      budget: entry.budget,
+      costCode: entry.costCode || '',
+      notes: (entry.supplier ? `Supplier: ${entry.supplier}. ` : '') + `Migrated from the old Projected Costs section (was ${entry.id}).`
+    };
+    state.greenSheets.push(greenSheetEntry);
+    if(entry.attachments && entry.attachments.length){
+      const j = state.jobs.find(x=>x.id===entry.jobId);
+      if(j){
+        j.contractDocs = j.contractDocs || [];
+        entry.attachments.forEach(a=>{
+          j.contractDocs.push({ name: a.name, dataUrl: a.dataUrl, docType: 'Green Sheet', uploadedBy: '', uploadedDate: todayStr() });
+        });
+      }
+    }
+  });
+  state.projectedCosts = [];
+  return true;
+}
 function stateBytes(s){ return new Blob([JSON.stringify(s)]).size; }
 
 /* ===================== AUTH (shared team passcode, optional Microsoft 365 SSO) =====================
@@ -1873,23 +1921,6 @@ function applyOp(op, s){
       break;
     }
     case 'deleteInvoice': s.invoices = s.invoices.filter(x=>x.id!==op.invId); break;
-    case 'addProjectedCost': s.projectedCosts.push(op.entry); break;
-    case 'updateProjectedCost': {
-      const pc = s.projectedCosts.find(x=>x.id===op.id);
-      if(pc) Object.assign(pc, op.patch);
-      break;
-    }
-    case 'addProjectedCostAttachments': {
-      const pc = s.projectedCosts.find(x=>x.id===op.id);
-      if(pc){ pc.attachments = pc.attachments || []; pc.attachments.push(...op.attachments); }
-      break;
-    }
-    case 'removeProjectedCostAttachment': {
-      const pc = s.projectedCosts.find(x=>x.id===op.id);
-      if(pc && pc.attachments) pc.attachments.splice(op.index, 1);
-      break;
-    }
-    case 'deleteProjectedCost': s.projectedCosts = s.projectedCosts.filter(x=>x.id!==op.id); break;
     case 'addTask': s.schedule.push(op.entry); break;
     case 'updateTask': {
       const t = s.schedule.find(x=>x.id===op.id);
@@ -2254,6 +2285,7 @@ async function doPersist(){
       // clobbers anybody else's.
       const server = await res.json();
       state = migrateAssignedPMs(Object.assign(defaultState(), server.state || {}));
+      migrateProjectedCosts();
       stateVersion = server.version;
       pendingQueue.forEach(op => applyOp(op));
       render();
@@ -2292,8 +2324,10 @@ function startPolling(){
       if(v > stateVersion){
         const loaded = await res.json();
         state = migrateAssignedPMs(Object.assign(defaultState(), loaded || {}));
+        const projectedCostsMigrated = migrateProjectedCosts();
         stateVersion = v;
         render();
+        if(projectedCostsMigrated && !readOnly) schedulePersist();
       }
     }catch(e){ /* offline for a moment — try again next tick */ }
   }, 15000);
@@ -3502,7 +3536,6 @@ function renderJob(){
   const specs = state.specs.filter(x=>x.jobId===job.id);
   const submittals = state.submittals.filter(x=>x.jobId===job.id);
   const invoices = state.invoices.filter(x=>x.jobId===job.id);
-  const projectedCosts = state.projectedCosts.filter(x=>x.jobId===job.id);
   const tasks = state.schedule.filter(x=>x.jobId===job.id);
   const notes = state.notes.filter(x=>x.jobId===job.id);
   const requests = state.requests.filter(x=>x.jobId===job.id);
@@ -3544,7 +3577,7 @@ function renderJob(){
   if(ui.tab==='elevations') body = renderElevations(elevations);
   if(ui.tab==='contacts') body = renderContacts(contacts);
   if(ui.tab==='rfis') body = renderRfis(rfis);
-  if(ui.tab==='costs') body = renderCosts(job, issues, invoices, projectedCosts, cos, isForeman);
+  if(ui.tab==='costs') body = renderCosts(job, issues, invoices, cos, isForeman);
   if(ui.tab==='budgetcosts') body = renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes);
   if(ui.tab==='contract') body = renderContract(job);
   if(ui.tab==='hours') body = renderHours(job, hoursEntries, elevations);
@@ -4010,8 +4043,8 @@ function coLogAmountCols(c){
   return cols;
 }
 /* ---- Feature E: Change orders moved from its own top-level per-job tab into
-   a fourth sub-tab of Costs, alongside Cost Impacts/Invoices/Projected Costs
-   (see renderCosts below) — Greg asked for it to live "under Costs" since
+   a third sub-tab of Costs, alongside Cost Impacts/Invoices (see renderCosts
+   below) — Greg asked for it to live "under Costs" since
    that's where the rest of a job's dollar tracking already lives. No data
    model change: same state.cos array, same renderCos/renderCoLog rendering,
    just reached a different way. Still fully hidden from Foreman — see
@@ -4097,15 +4130,15 @@ function renderCoLog(job, cos){
     </div>`;
 }
 
-/* ---- Costs (parent tab: cost impacts / invoices / projected costs / change orders) ---- */
-function renderCosts(job, issues, invoices, projectedCosts, cos, isForeman){
+/* ---- Costs (parent tab: cost impacts / invoices / change orders) ---- */
+function renderCosts(job, issues, invoices, cos, isForeman){
   // A Foreman only ever gets the Cost Impacts sub-tab, with dollar amounts
-  // stripped out (see renderIssues) — Invoices, Projected Costs, and Change
-  // orders stay fully hidden, same as the rest of Costs was before "costs"
-  // was added to FOREMAN_ALLOWED_TABS. Change orders was already
-  // Foreman-hidden as its own top-level tab (Feature E just moved it in
-  // here) — this branch is exactly what keeps it hidden now that it lives
-  // inside a tab a Foreman can otherwise partially see.
+  // stripped out (see renderIssues) — Invoices and Change orders stay fully
+  // hidden, same as the rest of Costs was before "costs" was added to
+  // FOREMAN_ALLOWED_TABS. Change orders was already Foreman-hidden as its
+  // own top-level tab (Feature E just moved it in here) — this branch is
+  // exactly what keeps it hidden now that it lives inside a tab a Foreman
+  // can otherwise partially see.
   if(isForeman){
     if(ui.costSubTab && ui.costSubTab!=='impacts') ui.costSubTab = 'impacts';
     return renderIssues(job, issues, true);
@@ -4115,13 +4148,11 @@ function renderCosts(job, issues, invoices, projectedCosts, cos, isForeman){
     <div class="subtabs">
       <div class="subtab ${sub==='impacts'?'active':''}" onclick="setCostSubTab('impacts')">Cost Impacts</div>
       <div class="subtab ${sub==='invoices'?'active':''}" onclick="setCostSubTab('invoices')">Invoices</div>
-      <div class="subtab ${sub==='projected'?'active':''}" onclick="setCostSubTab('projected')">Projected Costs</div>
       <div class="subtab ${sub==='changeorders'?'active':''}" onclick="setCostSubTab('changeorders')">Change orders</div>
     </div>`;
   let body = '';
   if(sub==='impacts') body = renderIssues(job, issues, false);
   if(sub==='invoices') body = renderInvoices(job, invoices);
-  if(sub==='projected') body = renderProjected(job, projectedCosts, invoices);
   if(sub==='changeorders') body = renderCos(job, cos);
   return subtabs + body;
 }
@@ -4160,40 +4191,6 @@ function renderInvoices(job, invoices){
     <tbody>${rows}</tbody></table>`}`;
 }
 
-/* ---- Projected costs ---- */
-function renderProjected(job, projectedCosts, invoices){
-  const totalProjected = projectedCosts.reduce((s,p)=>s+Number(p.budget||0),0);
-  const totalInvoiced = invoices.reduce((s,i)=>s+Number(i.amount||0),0);
-  const rows = projectedCosts.map(p=>{
-    const invoicedForCode = invoices.filter(i=>i.costCode===p.costCode).reduce((s,i)=>s+Number(i.amount||0),0);
-    const remaining = Number(p.budget||0) - invoicedForCode;
-    const cls = hoursPctClass(invoicedForCode, p.budget);
-    const pct = p.budget ? Math.round((invoicedForCode/p.budget)*100) : null;
-    const docCount = (p.attachments||[]).length;
-    return `
-    <tr>
-      <td data-label="Cost code" class="idcell">${esc(p.costCode)}</td>
-      <td data-label="Description">${esc(p.description || costCodeLabel(p.costCode) || '—')}</td>
-      <td data-label="Supplier">${esc(p.supplier||'—')}</td>
-      <td data-label="Budget">${fmtMoney(p.budget)}</td>
-      <td data-label="Invoiced">${fmtMoney(invoicedForCode)}</td>
-      <td data-label="Remaining">${fmtMoney(remaining)}</td>
-      <td data-label="% used"><span class="hrs-pct ${cls}">${pct!=null?pct+'%':'—'}</span></td>
-      <td data-label="Docs"><button class="btn sm secondary" onclick="openProjectedDetail('${p.id}')">${icon('paperclip')}${docCount?' '+docCount:''}</button></td>
-      <td data-label=""><button class="btn sm secondary" ${disabledAttr()} onclick="deleteProjectedCost('${p.id}')">${icon('trash')}</button></td>
-    </tr>`;
-  }).join('');
-  return `
-    <div class="panel-head"><h3>Projected costs</h3><button class="btn sm safety" ${disabledAttr()} onclick="openModal('projected')">${icon('plus')} Add projected cost</button></div>
-    <div class="co-summary" style="margin-bottom:16px;">
-      <div class="row"><span>Total projected cost</span><span>${fmtMoney(totalProjected)}</span></div>
-      <div class="row total"><span>Total invoiced to date</span><span>${fmtMoney(totalInvoiced)}</span></div>
-    </div>
-    ${projectedCosts.length===0 ? emptyBlock('fileInvoice','No projected costs added yet — break the budget out by cost code to track it against what has been invoiced.') : `
-    <table><thead><tr><th>Cost code</th><th>Description</th><th>Supplier</th><th>Budget</th><th>Invoiced</th><th>Remaining</th><th>% used</th><th>Docs</th><th></th></tr></thead>
-    <tbody>${rows}</tbody></table>`}`;
-}
-
 /* ---- Contract: Operations Manager / Project Manager only (see
    tabAllowedForCurrentUser). Upload the signed contract and the Green Sheet
    estimate as backup documents, and key in the budget for each system/scope
@@ -4201,7 +4198,8 @@ function renderProjected(job, projectedCosts, invoices){
    linked sheets, per-line labor/material buildups) to parse automatically, so
    this follows the same "keyed in manually" pattern already used for Schedule
    Updates. Link a cost code to a budget row to pull live "spent" from the
-   Invoice log, same math as Projected Costs above. ---- */
+   Invoice log, same math the Budget and Costs tab uses for its Green Sheet
+   budget lines (see renderBudgetCosts below). ---- */
 function contractDocsListHTML(job, docType){
   const docs = (job.contractDocs||[]).map((d,i)=>Object.assign({}, d, {idx:i})).filter(d=>d.docType===docType);
   if(docs.length===0) return `<div class="issue-meta">No ${docType.toLowerCase()} documents uploaded yet.</div>`;
@@ -6357,8 +6355,8 @@ function renderProcurementCalendar(procurement){
    are new job-scoped state (state.equipmentLog / state.dailyReports) that
    live ONLY here, saved through the same generic full-state persistence path
    as everything else (no server-side change needed — see
-   nucleus-pwa/server/roles.js: neither key is in COSTS_KEYS or
-   CONTRACT_KEYS, so both pass through unfiltered for every role, same as
+   nucleus-pwa/server/roles.js: neither key is in ISSUES_KEYS, FINANCIAL_KEYS,
+   or CONTRACT_KEYS, so both pass through unfiltered for every role, same as
    elevations/projectedHours in Feature C).
    Field Tool Kit is also FIRST in JOB_TAB_ORDER (see that comment above),
    which makes it the tab a Foreman lands on by default when opening a job —
@@ -6858,9 +6856,6 @@ function openModal(type){
   if(type==='procurement'){
     document.getElementById('proc-doc-input').addEventListener('change', (e)=>handleAnyFileSelect(e,'proc-doc-list'));
   }
-  if(type==='projected'){
-    document.getElementById('prj-doc-input').addEventListener('change', (e)=>handleAnyFileSelect(e,'prj-doc-list'));
-  }
   if(type==='note'){
     document.getElementById('note-scan-input').addEventListener('change', handleNoteScan);
   }
@@ -7082,27 +7077,6 @@ function modalHTML(type){
       <div class="err" id="f-err"></div>
       <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Cancel</button>
       <button class="btn safety" onclick="submitInvoice()">Add invoice</button></div>
-    </div>`;
-  }
-  if(type==='projected'){
-    return `<div class="modal">
-      <h3>Add projected cost</h3><p class="sub">${ui.jobId} — break the budget out by cost code</p>
-      <div class="field-row">
-        <div class="field"><label>Cost code</label><select id="f-code"><option value="">Select a cost code…</option>${costCodeOptions()}</select></div>
-        <div class="field"><label>Projected budget ($)</label><input type="number" id="f-budget" placeholder="0.00"></div>
-      </div>
-      <div class="field-row">
-        <div class="field"><label>Description (optional)</label><input id="f-desc" placeholder="Defaults to the cost code's name"></div>
-        <div class="field"><label>Supplier (optional)</label><input id="f-supplier" placeholder="e.g. Vitro Glass"></div>
-      </div>
-      <div class="field"><label>Quote / order confirmation (optional)</label>
-        <div class="photo-drop" onclick="document.getElementById('prj-doc-input').click()">${icon('fileUpload')}Tap to attach a quote or order confirmation</div>
-        <input type="file" id="prj-doc-input" multiple style="display:none;">
-        <div id="prj-doc-list" style="margin-top:8px;"></div>
-      </div>
-      <div class="err" id="f-err"></div>
-      <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Cancel</button>
-      <button class="btn safety" onclick="submitProjected()">Add projected cost</button></div>
     </div>`;
   }
   if(type==='task'){
@@ -8133,65 +8107,6 @@ function removeProcurementAttachment(event, idx){
   renderAttachList('proc-detail-attach-list', p ? p.attachments : [], false);
 }
 
-/* ---- Projected cost detail: supplier + quote / order confirmation attachments ---- */
-function openProjectedDetail(id){
-  const p = state.projectedCosts.find(x=>x.id===id);
-  if(!p) return;
-  closeModal();
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.dataset.prjId = id;
-  overlay.onclick = (e)=>{ if(e.target===overlay) closeModal(); };
-  overlay.innerHTML = projectedDetailHTML(p);
-  document.body.appendChild(overlay);
-  const input = document.getElementById('prj-detail-doc-input');
-  if(input) input.addEventListener('change', (e)=>handleProjectedDocSelect(e, p.id));
-}
-function projectedDetailHTML(p){
-  return `<div class="modal" style="max-width:600px;">
-    <h3>${p.id}</h3><p class="sub">${esc(p.costCode)}${p.description?` — ${esc(p.description)}`:''}</p>
-    <div class="field"><label>Supplier</label><input id="prj-detail-supplier" value="${esc(p.supplier||'')}" placeholder="e.g. Vitro Glass" ${disabledAttr()} onchange="updateProjectedSupplier('${p.id}', this.value)"></div>
-    <div class="field"><label>Quote / order confirmation</label>
-      <div id="prj-detail-attach-list">${(p.attachments&&p.attachments.length) ? p.attachments.map((a,i)=>`
-        <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
-        <button type="button" class="attach-remove" onclick="removeProjectedAttachment(event, ${i})" aria-label="Remove attachment">&times;</button></div>`).join('') : `<div class="issue-meta">No documents attached.</div>`}</div>
-      ${readOnly ? '' : `<div class="photo-drop" onclick="document.getElementById('prj-detail-doc-input').click()" style="margin-top:8px;">${icon('fileUpload')}Attach a quote or order confirmation</div>
-      <input type="file" id="prj-detail-doc-input" multiple style="display:none;">`}
-    </div>
-    <div class="modal-actions">
-      <button class="btn sm secondary" style="margin-right:auto;" ${disabledAttr()} onclick="deleteProjectedCost('${p.id}')">${icon('trash')} Delete</button>
-      <button class="btn secondary" onclick="closeModal()">Close</button>
-    </div>
-  </div>`;
-}
-function updateProjectedSupplier(id, supplier){ commit({type:'updateProjectedCost', id, patch:{supplier}}); }
-async function handleProjectedDocSelect(e, id){
-  const files = Array.from(e.target.files);
-  const newAttachments = [];
-  for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller file.`);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
-  }
-  e.target.value = '';
-  if(newAttachments.length){
-    commit({type:'addProjectedCostAttachments', id, attachments:newAttachments});
-    const p = state.projectedCosts.find(x=>x.id===id);
-    renderAttachList('prj-detail-attach-list', p ? p.attachments : [], false);
-  }
-}
-function removeProjectedAttachment(event, idx){
-  const overlay = document.querySelector('.modal-overlay');
-  const id = overlay ? overlay.dataset.prjId : null;
-  if(!id) return;
-  commit({type:'removeProjectedCostAttachment', id, index: idx});
-  const p = state.projectedCosts.find(x=>x.id===id);
-  renderAttachList('prj-detail-attach-list', p ? p.attachments : [], false);
-}
-
 /* ===================== SUBMIT HANDLERS ===================== */
 function submitInvoice(){
   const code = document.getElementById('f-code').value;
@@ -8210,28 +8125,6 @@ function submitInvoice(){
   };
   draftAttachments = [];
   commit({type:'addInvoice', entry});
-  closeModal();
-}
-function submitProjected(){
-  const code = document.getElementById('f-code').value;
-  if(!code) return showErr('Select a cost code.');
-  const budget = document.getElementById('f-budget').value;
-  if(budget==='' || isNaN(Number(budget))) return showErr('Enter a valid budget amount.');
-  const entry = {
-    id: nextId('projectedCosts', ui.jobId, 'PRJ'), jobId: ui.jobId,
-    costCode: code,
-    description: document.getElementById('f-desc').value.trim(),
-    budget: Number(budget),
-    supplier: document.getElementById('f-supplier').value.trim(),
-    attachments: draftAttachments.slice()
-  };
-  draftAttachments = [];
-  commit({type:'addProjectedCost', entry});
-  closeModal();
-}
-function deleteProjectedCost(id){
-  if(!confirm('Remove this projected cost line?')) return;
-  commit({type:'deleteProjectedCost', id});
   closeModal();
 }
 function submitTask(){
@@ -8770,6 +8663,7 @@ async function boot(){
     return;
   }
   state = migrateAssignedPMs(Object.assign(defaultState(), loaded || {}));
+  const projectedCostsMigrated = migrateProjectedCosts();
   if(verifiedIdentity && verifiedIdentity.matched && verifiedIdentity.teamMemberId){
     // Real, verified identity replaces the self-picked "You" dropdown.
     currentTeamMemberId = verifiedIdentity.teamMemberId;
@@ -8779,7 +8673,7 @@ async function boot(){
   render();
   if(loaded === null){
     setSavePill('offline', "Couldn't reach the server — changes stay in this tab until it's back");
-  } else if(pendingQueue.length){
+  } else if(pendingQueue.length || projectedCostsMigrated){
     doPersist();
   } else {
     setSavePill('saved', 'All changes saved');
