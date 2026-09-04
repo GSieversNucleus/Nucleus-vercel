@@ -169,6 +169,14 @@
     padding:9px 16px; display:flex; align-items:center; justify-content:center;
     gap:16px; font-weight:700; font-size:13px; flex-wrap:wrap; text-align:center;
   }
+  /* Bug fix: the class rule above sets display:flex unconditionally, which — at
+     equal CSS specificity — beats the browser's own [hidden]{display:none} default
+     stylesheet rule, since author styles win ties over user-agent styles. Net effect:
+     the hidden attribute was never actually hiding this element, so "Exit preview"
+     correctly cleared the preview state but the red banner itself stayed on screen
+     forever with stale text. This rule's higher specificity (class + attribute)
+     restores the intended hide behavior. */
+  .preview-banner[hidden]{ display:none; }
   .preview-banner .btn{ background:#fff; color:var(--safety); border:none; }
   .preview-banner .btn:hover{ background:#F1EFE8; }
 
