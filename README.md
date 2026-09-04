@@ -211,6 +211,31 @@ OAuth2/PKCE implementation, unchanged. Off by default; set all four of
 `APP_BASE_URL` (your deployed domain) in Vercel's environment variables to
 turn it on. See `.env.example` for where to get each value.
 
+## Push notifications
+
+When someone gets a Nucleus notification — a cost impact reported, a
+request assigned to them — they can also get a real phone/tablet alert for
+it, even if Nucleus isn't open, the same as the Render build. Identical
+implementation (`lib/webpush.js` is a byte-for-byte copy of the Render
+build's `server/webpush.js` — Node's own `crypto`/`https` only, no npm
+dependency, RFC 8291/8292), with subscriptions stored in Redis instead of a
+local file.
+
+Turn it on:
+
+1. Run `node generate-vapid-keys.js` once, from this project's folder
+   (locally, with Node — this isn't a deploy step).
+2. Add the two lines it prints (`NUCLEUS_VAPID_PUBLIC_KEY` /
+   `NUCLEUS_VAPID_PRIVATE_KEY`) to this project's Vercel environment
+   variables (see `.env.example`).
+3. Redeploy (or wait for your next deploy — env var changes apply to new
+   deployments).
+
+One-time setup for the whole deployment — once it's on, anyone signed in
+can turn on notifications for their own device from inside Nucleus. Leave
+both env vars unset to keep push notifications off; nothing else depends
+on them. Keep the private key as secret as `NUCLEUS_ENCRYPTION_KEY`.
+
 ## Cost
 
 Vercel's free (Hobby) tier is realistically enough to start on: it covers
