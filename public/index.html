@@ -1645,6 +1645,28 @@ function migrateAssignedPMs(s){
   });
   return s;
 }
+// Migration: Post-it category dropdown changed from Discuss/Call/Order/
+// Important/General (Operations-Manager-only) to Call/Reminder/Discuss/
+// Order (every role, now also driving the note's color — see
+// POSTIT_TYPES/POSTIT_TYPE_COLOR and postitNoteHTML further down). Remap
+// old values onto the new set so nothing shows blank or an option the
+// <select> no longer offers: General, and blank (every non-Ops-Manager
+// note before this change), fold into Discuss; Important -> Reminder as
+// the closest match ("don't lose track of this"); Call/Discuss/Order
+// carry straight over since they're unchanged. Called right after `state`
+// is (re)assigned at the same three points as migrateAssignedPMs above —
+// same simple-rename pattern, harmless to call more than once, no forced
+// save needed since re-running it against an already-migrated value is a
+// no-op.
+function migratePostitTypes(s){
+  const POSTIT_TYPE_MIGRATE = { General:'Discuss', Important:'Reminder' };
+  (s.postItBoards||[]).forEach(b=>{
+    (b.notes||[]).forEach(n=>{
+      if(!POSTIT_TYPES.includes(n.type)) n.type = POSTIT_TYPE_MIGRATE[n.type] || 'Discuss';
+    });
+  });
+  return s;
+}
 // Migration: the old "Projected Costs" sub-tab (state.projectedCosts) was a
 // leftover duplicate of what "Budget and Costs" (state.greenSheets) does
 // better — same budget-vs-invoiced-by-cost-code idea, just older, and it
@@ -2421,7 +2443,7 @@ async function doPersist(){
       // pending edits on top of it, and retry — so nobody's save silently
       // clobbers anybody else's.
       const server = await res.json();
-      state = migrateAssignedPMs(Object.assign(defaultState(), server.state || {}));
+      state = migratePostitTypes(migrateAssignedPMs(Object.assign(defaultState(), server.state || {})));
       migrateProjectedCosts();
       stateVersion = server.version;
       pendingQueue.forEach(op => applyOp(op));
@@ -2460,7 +2482,7 @@ function startPolling(){
       const v = Number(res.headers.get('X-State-Version')) || 0;
       if(v > stateVersion){
         const loaded = await res.json();
-        state = migrateAssignedPMs(Object.assign(defaultState(), loaded || {}));
+        state = migratePostitTypes(migrateAssignedPMs(Object.assign(defaultState(), loaded || {})));
         const projectedCostsMigrated = migrateProjectedCosts();
         stateVersion = v;
         render();
@@ -2799,28 +2821,43 @@ function removeStandardAttachment(event, idx){
        columns: [ {id, name} ],                 // user-defined, any order/count
        notes: [ {id, columnId, text, color, type, jobId, author, date, dueDate} ]
      }]
-   `type` (Discuss/Call/Order/Important/General) and `jobId` are only ever
-   set when the effective identity (View-As-aware, since this part IS a
-   pure visibility/what-fields-show-in-the-form concern) is Operations
-   Manager at the time the note is created/edited — every other role's
-   notes just carry plain text, type/jobId stay blank. Drag-and-drop between
-   columns reuses the exact same ondragstart/ondragover/ondrop mechanics as
-   the Engineering and Schedule Kanban boards (see onEngCardDragStart /
-   onEngColumnDrop above) rather than new drag logic.
+   `type` is a color-coded category — Call/Reminder/Discuss/Order (see
+   POSTIT_TYPES/POSTIT_TYPE_COLOR below) — shown and editable on every
+   note for every role; it drives the note's background color (postit-note
+   pcol-N class), replacing the old purely-decorative position-based
+   rotation. This used to be a 5-option field (Discuss/Call/Order/
+   Important/General) gated to Operations Manager only; Greg's "Color
+   Code post its. Drop down on the card will be Call, Reminder, Discuss,
+   Order" was — like the created/due-date request below — about the board
+   in general, not one role's workflow, so it was opened up to everyone
+   and the option set narrowed to match. Old values are remapped on load
+   (see the POSTIT_TYPE_MIGRATE step in boot()) so nothing shows blank or
+   an option that no longer exists. `jobId` stays Operations-Manager-gated
+   exactly as before — that part genuinely is Ops-Manager-specific
+   (tagging a note to a job for cost/contract follow-up), unrelated to
+   the color-coding change. Drag-and-drop between columns reuses the exact
+   same ondragstart/ondragover/ondrop mechanics as the Engineering and
+   Schedule Kanban boards (see onEngCardDragStart / onEngColumnDrop above)
+   rather than new drag logic.
    `date` (set once, at creation, to todayStr()) and `dueDate` (blank until
-   set) are NOT Ops-Manager-gated like type/jobId above — Greg: "add a time
+   set) are likewise not gated to any one role — Greg: "add a time
    stamp on when created and an option to add a due date" was a request
-   about the board in general, not that one role's workflow, so every
-   note on every identity's board gets both. `date` is editable after the
-   fact via an inline <input type=date>, same pattern as the per-job Notes
-   list's own date field (see renderNotes/updateNoteDate) — post-its can
-   sit around for a while before being filled in, same reasoning. `dueDate`
-   is optional and clearable (an empty value just removes it, unlike
-   `date` which a note must always carry); when set, the note shows a
-   Look-Ahead-style days-out/overdue badge (see renderLookAhead's dueCls
-   for the identical ok/warn/over threshold logic, reused rather than
-   redefined). ---- */
-const POSTIT_TYPES = ['Discuss','Call','Order','Important','General'];
+   about the board in general, so every note on every identity's board
+   gets both. `date` is editable after the fact via an inline
+   <input type=date>, same pattern as the per-job Notes list's own date
+   field (see renderNotes/updateNoteDate) — post-its can sit around for a
+   while before being filled in, same reasoning. `dueDate` is optional and
+   clearable (an empty value just removes it, unlike `date` which a note
+   must always carry); when set, the note shows a Look-Ahead-style
+   days-out/overdue badge (see renderLookAhead's dueCls for the identical
+   ok/warn/over threshold logic, reused rather than redefined). ---- */
+const POSTIT_TYPES = ['Call','Reminder','Discuss','Order'];
+// Category -> background color class, reusing the existing pcol-N palette
+// (see the .postit-note.pcol-N rules in <style>) rather than inventing new
+// colors: Call=amber (needs action), Reminder=safety/red (don't lose
+// track), Discuss=gc/teal (neutral conversation), Order=proc/purple
+// (matches the app's existing procurement/equipment color elsewhere).
+const POSTIT_TYPE_COLOR = { Call:'pcol-0', Reminder:'pcol-4', Discuss:'pcol-2', Order:'pcol-3' };
 function openPostitPage(){ ui.view='postit'; render(); }
 function renderPostitPage(){
   const app = document.getElementById('app');
@@ -2859,10 +2896,9 @@ function deletePostitColumn(colId){
 }
 function addPostitNote(colId){
   const me = getEffectiveTeamMember();
-  const isOpsMgr = !!(me && me.role==='Operations Manager');
   const note = {
     id: nextPostitId('PNOTE'), columnId: colId, text: 'New note',
-    type: isOpsMgr ? 'General' : '', jobId: '',
+    type: 'Discuss', jobId: '',
     author: currentUserName || (me && me.name) || '', date: todayStr(), dueDate: ''
   };
   commit({type:'addPostitNote', ownerId: postitOwnerId(), note});
@@ -2922,28 +2958,29 @@ function postitDueBadge(dueDate){
   else { label = `${days}d out`; cls='ok'; }
   return `<span class="hrs-pct ${cls}" style="font-size:10.5px;">${label}</span>`;
 }
-function postitNoteHTML(n, colorIdx){
+function postitNoteHTML(n){
   const me = getEffectiveTeamMember();
   const isOpsMgr = !!(me && me.role==='Operations Manager');
   const job = n.jobId ? getJob(n.jobId) : null;
   const metaBits = [];
   if(n.type) metaBits.push(esc(n.type));
   if(job) metaBits.push(esc(job.id));
+  const colorClass = POSTIT_TYPE_COLOR[n.type] || 'pcol-2';
   return `
-    <div class="postit-note pcol-${colorIdx%6}" draggable="${readOnly?'false':'true'}" ondragstart="onPostitNoteDragStart(event,'${n.id}')">
+    <div class="postit-note ${colorClass}" draggable="${readOnly?'false':'true'}" ondragstart="onPostitNoteDragStart(event,'${n.id}')">
       ${readOnly ? '' : `<button type="button" class="postit-remove" onclick="deletePostitNote('${n.id}')" aria-label="Delete post-it">&times;</button>`}
       ${metaBits.length ? `<div class="postit-meta">${metaBits.join(' · ')}</div>` : ''}
       <textarea ${disabledAttr()} onchange="updatePostitNoteText('${n.id}', this.value)">${esc(n.text)}</textarea>
-      ${(!readOnly && isOpsMgr) ? `
       <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px;">
-        <select style="font-size:11px; padding:2px 4px;" onchange="updatePostitNoteType('${n.id}', this.value)">
-          ${POSTIT_TYPES.map(t=>`<option ${(n.type||'General')===t?'selected':''}>${t}</option>`).join('')}
+        <select ${disabledAttr()} style="font-size:11px; padding:2px 4px;" onchange="updatePostitNoteType('${n.id}', this.value)">
+          ${POSTIT_TYPES.map(t=>`<option ${(n.type||'Discuss')===t?'selected':''}>${t}</option>`).join('')}
         </select>
+        ${(!readOnly && isOpsMgr) ? `
         <select style="font-size:11px; padding:2px 4px;" onchange="updatePostitNoteJob('${n.id}', this.value)">
           <option value="">No job</option>
           ${visibleJobs().slice().sort((a,b)=>a.id.localeCompare(b.id)).map(j=>`<option value="${j.id}" ${n.jobId===j.id?'selected':''}>${j.id} — ${esc(j.name)}</option>`).join('')}
-        </select>
-      </div>` : ''}
+        </select>` : ''}
+      </div>
       <div style="margin-top:8px; padding-top:6px; border-top:1px dashed rgba(18,24,31,.18); display:flex; flex-direction:column; gap:3px; font-size:10.5px; opacity:.85;">
         <label style="display:flex; align-items:center; gap:4px;">Created
           <input type="date" value="${esc(n.date||'')}" ${disabledAttr()} style="font:inherit; font-size:10.5px; padding:1px 3px; border:1px solid rgba(18,24,31,.25); border-radius:3px; background:rgba(255,255,255,.5); color:inherit;" onchange="updatePostitNoteDate('${n.id}', this.value)">
@@ -2967,7 +3004,7 @@ function renderPostitBoardSection(){
         ${readOnly ? '' : `<button type="button" class="attach-remove" onclick="deletePostitColumn('${col.id}')" title="Delete column" aria-label="Delete column">&times;</button>`}
       </div>
       ${readOnly ? '' : `<button class="btn sm secondary" style="width:100%; margin-bottom:10px;" onclick="addPostitNote('${col.id}')">${icon('plus')} Add post-it</button>`}
-      ${notes.length===0 ? `<div class="issue-meta" style="padding:2px 0 8px;">Nothing here.</div>` : notes.map((n,i)=>postitNoteHTML(n,i)).join('')}
+      ${notes.length===0 ? `<div class="issue-meta" style="padding:2px 0 8px;">Nothing here.</div>` : notes.map(n=>postitNoteHTML(n)).join('')}
     </div>`;
   }).join('');
   return `
@@ -9043,7 +9080,7 @@ async function boot(){
     showLoginGate();
     return;
   }
-  state = migrateAssignedPMs(Object.assign(defaultState(), loaded || {}));
+  state = migratePostitTypes(migrateAssignedPMs(Object.assign(defaultState(), loaded || {})));
   const projectedCostsMigrated = migrateProjectedCosts();
   if(verifiedIdentity && verifiedIdentity.matched && verifiedIdentity.teamMemberId){
     // Real, verified identity replaces the self-picked "You" dropdown.
