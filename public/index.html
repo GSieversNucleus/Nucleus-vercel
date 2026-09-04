@@ -93,6 +93,42 @@
     letter-spacing:.02em;
   }
   .role-toggle button.active{ background:var(--safety); color:#fff; }
+  /* Persistent search row — a second full-width dark bar under the main top
+     bar, replacing the old click-to-open Search button/modal (Greg: "add a
+     second row for buttons up top, but make that a search bar" — the old
+     purely-cosmetic Foreman/PM view toggle that used to sit next to the
+     Search button was removed in the same round, since real per-identity
+     tab visibility now makes it redundant.
+     Reuses the exact same search logic and scope toggle as before
+     (searchApp/renderSearchResultsHTML, both untouched) — only the entry
+     point changed, from a modal opened by a button to an always-visible
+     input with a live results dropdown. */
+  .search-row{
+    position:relative; background:var(--ink); border-top:1px solid #232B36;
+    padding:10px 20px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  }
+  .search-row-field{ position:relative; flex:1 1 320px; min-width:180px; display:flex; align-items:center; }
+  .search-row-field .icon{ position:absolute; left:12px; color:#8993A0; pointer-events:none; }
+  .search-row-field input{
+    width:100%; background:#1D2530; border:1px solid #384250; color:#fff;
+    border-radius:8px; padding:9px 12px 9px 34px; font-family:var(--sans); font-size:13px;
+  }
+  .search-row-field input::placeholder{ color:#8993A0; }
+  .search-row-field input:focus{ outline:none; border-color:var(--steel-dim); }
+  .search-row-scope{ display:flex; background:#1D2530; border-radius:8px; padding:3px; gap:2px; flex-shrink:0; }
+  .search-row-scope button{
+    border:none; background:transparent; color:#9AA3AC; font-family:var(--sans);
+    font-weight:600; font-size:11.5px; padding:7px 11px; border-radius:6px; cursor:pointer;
+    white-space:nowrap;
+  }
+  .search-row-scope button.active{ background:var(--safety); color:#fff; }
+  .search-row-results{
+    position:absolute; top:100%; left:20px; right:20px; z-index:56;
+    background:var(--card); color:var(--ink); border:1.5px solid var(--line-strong);
+    border-top:none; border-radius:0 0 var(--radius) var(--radius); box-shadow:0 12px 32px rgba(0,0,0,.28);
+    padding:10px 14px; max-height:60vh; overflow-y:auto;
+  }
+  .search-row-results[hidden]{ display:none; }
   .home-btn{
     border:1px solid #384250; background:transparent; color:#E7E5DF; padding:8px 12px;
     border-radius:8px; font-family:var(--sans); font-weight:600; font-size:12.5px; cursor:pointer;
@@ -357,13 +393,12 @@
   .badge.cat-coord{ background:var(--steel-dim); color:var(--steel-dark); }
 
   /* ---------- Forms / modal ---------- */
-  .modal-overlay, .search-overlay{
+  .modal-overlay{
     position:fixed; inset:0; background:rgba(18,24,31,.55); display:flex; align-items:flex-start;
     justify-content:center; padding:40px 16px; z-index:50; overflow-y:auto;
   }
-  .search-overlay{ z-index:55; align-items:flex-start; padding-top:64px; }
-  #search-results mark{ background:var(--amber-dim); color:var(--ink); padding:0 1px; border-radius:2px; }
-  #search-results .section-title:first-child{ margin-top:0; }
+  #topsearch-results mark{ background:var(--amber-dim); color:var(--ink); padding:0 1px; border-radius:2px; }
+  #topsearch-results .section-title:first-child{ margin-top:0; }
   .modal{
     background:var(--card); border-radius:14px; width:100%; max-width:560px; padding:22px 24px 24px;
     border:1px solid var(--line);
@@ -588,6 +623,13 @@
        behavior already uses. */
     .brand-text h1{ font-size:20px; }
     .brand-text p{ font-size:10px; }
+    /* Persistent search row: input and scope toggle stack to full width
+       instead of squeezing onto one line next to each other. */
+    .search-row{ padding:8px 12px; }
+    .search-row-field{ flex:1 1 100%; }
+    .search-row-scope{ flex:1 1 100%; }
+    .search-row-scope button{ flex:1; text-align:center; }
+    .search-row-results{ left:12px; right:12px; }
     .field-row, .field-row.three{ grid-template-columns:1fr; }
     .issue-card{ grid-template-columns:56px 1fr; }
     .issue-actions{ grid-column:1/-1; flex-direction:row; align-items:center; justify-content:flex-end; }
@@ -629,8 +671,6 @@
     <button class="home-btn" onclick="openStandardsPage()" title="Company-wide standards and procedures — not tied to any one job"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1Z"/><path d="M6 6h12a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z"/><path d="M9 11h6M9 14h6M9 17h3.5"/></svg> Standards</button>
     <button class="home-btn" onclick="openPostitPage()" title="Your own personal sticky-note board — not tied to any one job, not shared"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h11l3 3v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"/><path d="M16 5v3a1 1 0 0 0 1 1h3"/></svg> Post it Board</button>
     <button class="home-btn" onclick="downloadBackup()" title="Download a full backup of everything entered in Nucleus"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10m0 0-3.5-3.5M12 14l3.5-3.5"/><path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></svg> Backup data</button>
-    <button class="home-btn" onclick="openSearch()" title="Search RFIs, change orders, cost impacts, notes, and more"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg> Search</button>
-    <button class="home-btn" id="view-mode-btn" onclick="toggleViewMode()" title="Everyone can see and edit everything either way — this just switches the label for orientation."><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2.5"/><circle cx="12" cy="10.5" r="2.2"/><path d="M8 17c.6-1.8 2-2.7 4-2.7s3.4.9 4 2.7"/></svg> <span id="view-mode-text">Foreman view</span></button>
     <select id="identity-select" class="identity-select" onchange="setCurrentTeamMember(this.value)" title="Choose who you are. A Project Manager's dashboard then only shows jobs assigned to them, and a Foreman's dashboard only shows jobs they're assigned to as well — assign both from each job card on the home screen. A Foreman only sees Scope, Specs, Elevations, Contacts, RFIs, PM Requests For Field, Schedule, Procurement, Safety Docs, Welding Procedures, Water Testing, Notes, After Action Report, and Cost Impacts (no dollar amounts). Add people from the Team dropdown in the top bar."><option value="">Not signed in</option></select>
     <div class="notif-dd-wrap" id="notif-wrap" hidden>
       <button class="home-btn notif-bell-btn" id="notif-bell-btn" onclick="toggleNotificationsDropdown()" title="Notifications"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6.5H4c.5-1 2-2.5 2-6.5Z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg> Notifications<span id="notif-badge" class="notif-badge" hidden>0</span></button>
@@ -649,6 +689,16 @@
     </div>
     <button class="home-btn" id="change-password-btn" onclick="openChangePasswordModal()" title="Change your Nucleus password" style="display:none;"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><path d="M12 15v2.5"/></svg> Change password</button>
     <button class="home-btn" onclick="signOut()" title="Sign out of Nucleus on this device"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Sign out</button>
+  </div>
+</div>
+<div class="search-row" id="search-row">
+  <div class="search-row-field">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+    <input id="topsearch-input" type="text" placeholder="Search RFIs, change orders, cost impacts, notes, and more…" autocomplete="off" oninput="onTopSearchInput(this.value)" onfocus="onTopSearchFocus()" onblur="onTopSearchBlur()" onkeydown="topSearchKeydown(event)">
+  </div>
+  <div class="search-row-scope" id="search-row-scope"></div>
+  <div class="search-row-results" id="topsearch-results-wrap" hidden>
+    <div id="topsearch-results"></div>
   </div>
 </div>
 <div class="preview-banner" id="preview-banner" hidden>
@@ -697,7 +747,8 @@ const ICON_PATHS = {
   droplet: '<path d="M12 3c3 4.2 6.2 7.8 6.2 11.3a6.2 6.2 0 0 1-12.4 0C5.8 10.8 9 7.2 12 3Z"/><path d="M9.2 15.5a2.8 2.8 0 0 0 2.8 2.4"/>',
   lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><path d="M12 15v2.5"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
-  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>'
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  sliders: '<path d="M4 6h4M12 6h8M4 12h8M16 12h4M4 18h10M18 18h2"/><circle cx="8.2" cy="6" r="2.1"/><circle cx="14.2" cy="12" r="2.1"/><circle cx="12.2" cy="18" r="2.1"/>'
 };
 function icon(name, cls){
   return `<svg class="icon ${cls||''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name]||''}</svg>`;
@@ -711,6 +762,16 @@ let state = defaultState();
 // never saved, never sent anywhere, always starts unset on a fresh load. See
 // getEffectiveTeamMember/setPreviewRole/exitPreview near Team & identity below.
 let ui = { view: 'home', jobId: null, tab: 'overview', costSubTab: 'impacts', coView: 'cards', specsView: 'cards', scheduleMonth: currentMonthStr(), homeMonth: currentMonthStr(), overviewCalMonth: currentMonthStr(), overviewCalMode: 'field', searchScope: 'all', engFilterJobId: '', schedFilterJobId: '', mpHoursPerDay: 8, opsCalJobId: '', opsCalMonth: currentMonthStr(), opsCalMode: 'field', superSchedMonth: currentMonthStr(), jobLogAuthor: '', jobLogBucket: '', previewRole: null,
+  // Superintendent's consolidated home calendar (scope + type toggle, shares
+  // renderRoleCalendarSection with Operations' calendar above) — month reuses
+  // superSchedMonth above rather than a redundant key. jobId '' means "all jobs".
+  superCalJobId: '', superCalMode: 'field',
+  // Engineering Manager's home-screen drafting-only calendar (all jobs, no
+  // scope/type toggle needed — it only ever shows engineering dates).
+  engCalMonth: currentMonthStr(),
+  // Team roster inline edit — which member row (by id) is currently showing
+  // the edit form in place of its normal row, or null when none is.
+  editingTeamMemberId: null,
   // Feature F: Procurement tab's own compact calendar, and the Project
   // Manager home-screen large calendar (mirrors opsCal* above, but scoped
   // to the PM's own assigned jobs — see renderPMCalendarSection).
@@ -732,7 +793,7 @@ function isJobVisible(jobId){
   if(!me) return true;
   const job = getJob(jobId);
   if(!job) return false;
-  if(me.role==='Project Manager') return job.assignedPM===me.id;
+  if(me.role==='Project Manager') return (job.assignedPMs||[]).includes(me.id);
   if(me.role==='Foreman') return (job.assignedForemen||[]).includes(me.id);
   return true;
 }
@@ -763,32 +824,6 @@ function rememberName(name){
   if(!name || name===currentUserName) return;
   currentUserName = name;
   try{ localStorage.setItem(NAME_STORAGE_KEY, name); }catch(e){ /* private mode, etc. */ }
-}
-
-// Foreman view is a plain, unlocked display toggle — not a login or a permission
-// gate. Everything stays visible and editable either way; it just remembers which
-// label/orientation this device last used, so a foreman doesn't have to explain
-// themselves every time they open the link.
-const VIEW_MODE_STORAGE_KEY = 'nucleus-view-mode';
-let viewMode = 'pm';
-try{ viewMode = localStorage.getItem(VIEW_MODE_STORAGE_KEY)==='foreman' ? 'foreman' : 'pm'; }catch(e){ /* private mode, etc. */ }
-function toggleViewMode(){
-  viewMode = viewMode==='foreman' ? 'pm' : 'foreman';
-  try{ localStorage.setItem(VIEW_MODE_STORAGE_KEY, viewMode); }catch(e){ /* private mode, etc. */ }
-  updateViewModeButton();
-  render();
-}
-function updateViewModeButton(){
-  const btn = document.getElementById('view-mode-btn');
-  const text = document.getElementById('view-mode-text');
-  if(!btn || !text) return;
-  if(viewMode==='foreman'){
-    text.textContent = 'PM view';
-    btn.title = "Switch back to PM view. Everyone can see and edit everything either way — this just switches the label for orientation.";
-  } else {
-    text.textContent = 'Foreman view';
-    btn.title = "Switch to Foreman view. Everyone can see and edit everything either way — this just switches the label for orientation.";
-  }
 }
 
 /* ---- Team & identity ----
@@ -851,7 +886,12 @@ function getEffectiveTeamMember(){
   const real = getCurrentTeamMember();
   if(real && real.role==='App Manager' && ui.previewRole){
     if(ui.previewRole==='none') return null; // previewing "no role selected"
-    return Object.assign({}, real, { role: ui.previewRole });
+    // Role-preview clone: a role swap only, not a specific real person — so it
+    // deliberately drops tabOverrides (the real App Manager's own personal
+    // per-tab overrides must never leak into a preview of another role) and
+    // carries __isPreview so every visibility check below can branch on it
+    // explicitly rather than relying only on the missing field.
+    return Object.assign({}, real, { role: ui.previewRole, tabOverrides: null, __isPreview: true });
   }
   return real;
 }
@@ -930,6 +970,34 @@ function deleteTeamMember(id){
   if(!confirm(`Remove ${m.name} — ${m.role} from the team? Any jobs assigned to them will become unassigned.`)) return;
   commit({type:'deleteTeamMember', id});
 }
+// Edit-in-place (name/role/email — the id is preserved always, since every
+// job assignment, notification, note/AAR authorship, post-it board
+// ownership, and login match-by-email is keyed to it). Renders an inline
+// form in place of the roster row instead of a modal — see
+// renderTeamSection's memberRow. Same canManageTeam gate as Delete right
+// beside it, no new permission model invented.
+function startEditTeamMember(id){
+  ui.editingTeamMemberId = id;
+  render();
+}
+function cancelEditTeamMember(){
+  ui.editingTeamMemberId = null;
+  render();
+}
+function submitEditTeamMember(id){
+  const nameEl = document.getElementById(`team-edit-name-${id}`);
+  const roleEl = document.getElementById(`team-edit-role-${id}`);
+  const emailEl = document.getElementById(`team-edit-email-${id}`);
+  if(!nameEl || !roleEl) return;
+  const name = nameEl.value.trim();
+  if(!name) return;
+  const role = roleEl.value;
+  const patch = { name, role };
+  if(emailEl) patch.email = emailEl.value.trim();
+  commit({type:'updateTeamMember', id, patch});
+  ui.editingTeamMemberId = null;
+  render();
+}
 
 /* ---- Per-role tab access. This is a UI-level filter tied to whichever team
    member this device has selected as "You" — same caveat as job visibility
@@ -955,13 +1023,20 @@ function deleteTeamMember(id){
 // tool, no financial data, and (per the FOREMAN_ALLOWED_TABS comment below)
 // visible to the exact same roles Notes already is, Foreman included.
 const JOB_TAB_ORDER = ['fieldkit','overview','scope','specs','elevations','contacts','rfis','costs','budgetcosts','contract','hours','requests','engineering','schedule','procurement','safety','welding','watertest','notes','meetingminutes','aar'];
-// Foreman also gets "costs" — but only the Cost Impacts sub-tab within it
-// (Invoices, Projected Costs, and Change orders, plus every dollar figure in
-// Cost Impacts itself, stay hidden — see renderCosts/renderIssues below).
-// This lets a Foreman report and see damage/inefficiency issues without
-// exposing pricing, invoices, or budget data. "fieldkit" (Field Tool Kit) is
-// Foreman-visible too — see the JOB_TAB_ORDER comment above.
-const FOREMAN_ALLOWED_TABS = ['fieldkit','scope','specs','elevations','contacts','rfis','requests','schedule','procurement','safety','welding','watertest','notes','meetingminutes','aar','costs','alllogs'];
+// 'elevations' and 'costs' were REMOVED from this list per Greg's request:
+// "Take away costs and elevations on the side bar for Foreman. They should
+// have everything in their Field Tool Kit section." A Foreman no longer gets
+// either as a standalone sidebar tab — but loses nothing, because Field Tool
+// Kit now renders the full Elevation tracker and the full (no-dollar-amounts)
+// Cost Impacts view directly inline using the exact same render functions
+// (renderElevations/renderIssues) instead of linking out to these tab ids —
+// see renderFieldToolKit and fieldKitEmbedAllowed below. Both keys stay
+// meaningful even though they're off by default here: an App Manager/
+// Operations Manager can still grant either back to one specific Foreman as a
+// real standalone tab via that person's tabOverrides (see "Per-person tab
+// overrides" below) — removing them from this default list only changes what
+// a Foreman sees with no override set.
+const FOREMAN_ALLOWED_TABS = ['fieldkit','scope','specs','contacts','rfis','requests','schedule','procurement','safety','welding','watertest','notes','meetingminutes','aar','alllogs'];
 // "Contract" (contract + Green Sheet documents, and the budget-by-system table keyed
 // in from the Green Sheet) is the one tab that works the other way round from the
 // Foreman restriction above: it's hidden from everyone EXCEPT Operations Manager and
@@ -969,6 +1044,63 @@ const FOREMAN_ALLOWED_TABS = ['fieldkit','scope','specs','elevations','contacts'
 // is the one place actual budget figures live outside Costs/Hours. Same honesty caveat
 // as everywhere else in Team & roles: this is a device-level filter, not real security.
 const CONTRACT_TAB_ALLOWED_ROLES = ['Operations Manager','Project Manager'];
+// Every tab a per-person override can target — JOB_TAB_ORDER plus 'alllogs'
+// (the "Log & Notes" job-header button, gated through this exact same
+// tabAllowedForCurrentUser() machinery even though it isn't one of the
+// tab-bar entries). Labels match the tab bar / job header exactly.
+const OVERRIDABLE_TABS = [
+  {key:'fieldkit', label:'Field Tool Kit'},
+  {key:'overview', label:'Overview'},
+  {key:'scope', label:'Scope'},
+  {key:'specs', label:'Specs'},
+  {key:'elevations', label:'Elevations'},
+  {key:'contacts', label:'Contacts'},
+  {key:'rfis', label:'RFIs'},
+  {key:'costs', label:'Costs'},
+  {key:'budgetcosts', label:'Budget and Costs'},
+  {key:'contract', label:'Contract'},
+  {key:'hours', label:'Hours'},
+  {key:'requests', label:'PM Requests For Field'},
+  {key:'engineering', label:'Engineering'},
+  {key:'schedule', label:'Schedule'},
+  {key:'procurement', label:'Procurement'},
+  {key:'safety', label:'Safety Docs'},
+  {key:'welding', label:'Welding Procedures'},
+  {key:'watertest', label:'Water Testing'},
+  {key:'notes', label:'Notes'},
+  {key:'meetingminutes', label:'Meeting Minutes'},
+  {key:'aar', label:'After Action Report'},
+  {key:'alllogs', label:'Log & Notes'}
+];
+// The role-based default for a tab, with no per-person override applied.
+// Kept as its own function so the tab-overrides settings panel can show
+// "what would this person see with no override" next to what they see now.
+function roleDefaultTabAllowed(tabKey, role){
+  if(tabKey==='contract' || tabKey==='budgetcosts') return !!role && CONTRACT_TAB_ALLOWED_ROLES.includes(role);
+  if(role==='Foreman') return FOREMAN_ALLOWED_TABS.includes(tabKey);
+  return true;
+}
+/* ---- Per-person tab overrides (App Manager / Operations Manager only) ----
+   Greg: "for App manager and Operations manager put a settings option to
+   turn on or off sections for each individual to make it easier for what
+   each person can view." Each team member can carry a `tabOverrides` map,
+   e.g. {costs:false, engineering:true} — a key PRESENT forces that tab ON or
+   OFF for that specific person regardless of their role's default; a key
+   ABSENT means "use the role default," unchanged from before this feature.
+   This is a true two-way override tied to a specific person's team-member
+   id, not to a role in the abstract.
+   Critical interaction with "View as": a View-As role-preview clone from
+   getEffectiveTeamMember() is a shallow clone of the REAL signed-in App
+   Manager with just the role swapped — no specific real person is being
+   simulated, so it must NEVER pick up the real App Manager's own personal
+   tabOverrides. getEffectiveTeamMember() marks that clone with __isPreview
+   and strips tabOverrides from it; tabAllowedForCurrentUser below branches on
+   __isPreview so a preview clone always resolves to a pure role-default
+   view, and only a real, specific signed-in person's own overrides are ever
+   applied. Persisted the normal way this app persists team member data —
+   through the same updateTeamMember reducer/commit path already used for
+   name/role/email edits, so it round-trips through /api/state exactly like
+   everything else (see the `updateTeamMember` case in applyOp). */
 function openSetPasswordModal(memberId){
   if(readOnly) return;
   const m = state.team.find(x=>x.id===memberId);
@@ -1026,12 +1158,26 @@ async function submitSetPassword(){
 
 function tabAllowedForCurrentUser(tabKey){
   const me = getEffectiveTeamMember();
-  if(tabKey==='contract' || tabKey==='budgetcosts') return !!me && CONTRACT_TAB_ALLOWED_ROLES.includes(me.role);
-  if(me && me.role==='Foreman') return FOREMAN_ALLOWED_TABS.includes(tabKey);
-  return true;
+  const role = me ? me.role : null;
+  const roleDefault = roleDefaultTabAllowed(tabKey, role);
+  if(!me || me.__isPreview) return roleDefault; // no identity, or a View-As preview clone: role default only, never personal overrides
+  if(me.tabOverrides && Object.prototype.hasOwnProperty.call(me.tabOverrides, tabKey)) return !!me.tabOverrides[tabKey];
+  return roleDefault;
 }
 function firstAllowedTab(){
   return JOB_TAB_ORDER.find(t=>tabAllowedForCurrentUser(t)) || 'scope';
+}
+// Who can open the per-person tab-visibility settings panel — App Manager or
+// Operations Manager, checked against verifiedIdentity (the real,
+// server-verified signed-in identity — the same source canManageLogins/
+// canManageTeam already use in renderTeamSection), so a View-As preview can
+// never grant this ability to anyone previewing as one of those roles — only
+// actually BEING one, for real (and actually signed in as them), opens it.
+// Deliberately a wider check than canManageTeam (App-Manager-only, plus the
+// empty-roster bootstrap exception) right next to it in the roster row — not
+// a loosening of that gate, a distinct, broader one for a distinct ability.
+function canManageTabOverrides(){
+  return !!(verifiedIdentity && verifiedIdentity.matched && (verifiedIdentity.role==='App Manager' || verifiedIdentity.role==='Operations Manager'));
 }
 
 /* ---- Global keyword search — across the whole app or just the open job.
@@ -1135,56 +1281,92 @@ function renderSearchResultsHTML(query, q){
       </div>`).join('')}
   `).join('');
 }
-function searchModalHTML(query){
-  const job = ui.jobId ? getJob(ui.jobId) : null;
-  return `<div class="modal" style="max-width:640px;">
-    <h3>${icon('search')} Search Nucleus</h3>
-    <p class="sub">Find RFIs, change orders, cost impacts, requests, notes, logs, elevations, contacts, schedule items, and more — by keyword.</p>
-    ${job ? `<div class="subtabs">
-      <div class="subtab ${ui.searchScope==='job'?'active':''}" onclick="setSearchScope('job')">This job (${job.id})</div>
-      <div class="subtab ${ui.searchScope==='all'?'active':''}" onclick="setSearchScope('all')">All jobs</div>
-    </div>` : ''}
-    <div class="field" style="margin-bottom:10px;">
-      <input id="search-input" type="text" placeholder="Search by keyword…" value="${esc(query)}" oninput="onSearchInput(this.value)" autocomplete="off">
-    </div>
-    <div id="search-results">${renderSearchResultsHTML(query, query.trim())}</div>
-    <div class="modal-actions"><button class="btn secondary" onclick="closeSearch()">Close</button></div>
-  </div>`;
+/* ---- Persistent search row ----
+   Used to be a "Search" button in the top bar that opened a modal
+   (searchModalHTML/openSearch/closeSearch). Per Greg's request, the entry
+   point is now a second, always-visible row under the top bar with a real
+   text input — no button/modal to open first. The actual search logic
+   (searchApp above) and its results rendering (renderSearchResultsHTML
+   above) are reused completely unchanged; only what drives them and where
+   the results appear is new. Results show as a live dropdown anchored under
+   the row, shown while the input has anything typed in it and hidden again
+   on Escape, on picking a result, or on clicking/tabbing away. */
+function searchScopeControlHTML(){
+  const job = (ui.view==='job' && ui.jobId) ? getJob(ui.jobId) : null;
+  if(!job) return '';
+  return `<button type="button" class="${ui.searchScope==='job'?'active':''}" onclick="setTopSearchScope('job')">This job (${esc(job.id)})</button>
+    <button type="button" class="${ui.searchScope==='all'?'active':''}" onclick="setTopSearchScope('all')">All jobs</button>`;
 }
-function openSearch(){
-  ui.searchScope = (ui.view==='job' && ui.jobId) ? 'job' : 'all';
-  const overlay = document.createElement('div');
-  overlay.className = 'search-overlay';
-  overlay.id = 'search-overlay';
-  overlay.onclick = (e)=>{ if(e.target===overlay) closeSearch(); };
-  overlay.innerHTML = searchModalHTML('');
-  document.body.appendChild(overlay);
-  document.addEventListener('keydown', searchEscHandler);
-  setTimeout(()=>{ const inp=document.getElementById('search-input'); if(inp) inp.focus(); }, 30);
+function renderSearchScopeButtons(){
+  const wrap = document.getElementById('search-row-scope');
+  if(wrap) wrap.innerHTML = searchScopeControlHTML();
 }
-function searchEscHandler(e){ if(e.key==='Escape') closeSearch(); }
-function closeSearch(){
-  const el = document.getElementById('search-overlay');
-  if(el) el.remove();
-  document.removeEventListener('keydown', searchEscHandler);
+// Called from render() (so it's always current) — keeps the scope toggle in
+// sync with whatever job (if any) is currently open, and forces scope back
+// to "all" once there's no job left to scope to (can't stay "This job" with
+// no job open). Deliberately does NOT reset scope to "job" just because a
+// job is open — that would fight a deliberate "All jobs" pick every time
+// something elsewhere on the page triggers a re-render. That reset instead
+// happens once, on a fresh focus of the input (see onTopSearchFocus) — the
+// same moment the old Search button's modal used to recompute its default
+// scope every time it was opened.
+function updateSearchScopeControl(){
+  const wrap = document.getElementById('search-row-scope');
+  if(!wrap) return;
+  const job = (ui.view==='job' && ui.jobId) ? getJob(ui.jobId) : null;
+  if(!job) ui.searchScope = 'all';
+  renderSearchScopeButtons();
+  const inp = document.getElementById('topsearch-input');
+  if(inp && inp.value.trim()) onTopSearchInput(inp.value);
 }
-function setSearchScope(scope){
+function setTopSearchScope(scope){
   ui.searchScope = scope;
-  const inp = document.getElementById('search-input');
-  const q = inp ? inp.value : '';
-  const overlay = document.getElementById('search-overlay');
-  if(overlay){
-    overlay.innerHTML = searchModalHTML(q);
-    const inp2 = document.getElementById('search-input');
-    if(inp2){ inp2.focus(); const len=inp2.value.length; inp2.setSelectionRange(len,len); }
-  }
+  renderSearchScopeButtons();
+  const inp = document.getElementById('topsearch-input');
+  if(inp){ inp.value ? onTopSearchInput(inp.value) : null; inp.focus(); }
 }
-function onSearchInput(val){
-  const results = document.getElementById('search-results');
+function showTopSearchResults(){
+  const wrap = document.getElementById('topsearch-results-wrap');
+  if(wrap) wrap.hidden = false;
+}
+function hideTopSearchResults(){
+  const wrap = document.getElementById('topsearch-results-wrap');
+  if(wrap) wrap.hidden = true;
+}
+function onTopSearchFocus(){
+  const wrap = document.getElementById('topsearch-results-wrap');
+  const freshOpen = !wrap || wrap.hidden;
+  if(freshOpen){
+    // Same default the old Search button's modal picked every time it was
+    // opened: scoped to the current job if you're on one, all jobs otherwise.
+    const job = (ui.view==='job' && ui.jobId) ? getJob(ui.jobId) : null;
+    ui.searchScope = job ? 'job' : 'all';
+    renderSearchScopeButtons();
+  }
+  const inp = document.getElementById('topsearch-input');
+  if(inp && inp.value) onTopSearchInput(inp.value);
+}
+function onTopSearchBlur(){
+  // Clicking a result (or the scope toggle) blurs the input too — delay
+  // the hide just long enough for that click's own handler to run first
+  // (setTopSearchScope/goToSearchResult), and skip hiding entirely if
+  // focus already landed back on the input (setTopSearchScope refocuses it).
+  setTimeout(()=>{
+    if(document.activeElement !== document.getElementById('topsearch-input')) hideTopSearchResults();
+  }, 150);
+}
+function topSearchKeydown(e){
+  if(e.key==='Escape'){ hideTopSearchResults(); e.target.blur(); }
+}
+function onTopSearchInput(val){
+  const results = document.getElementById('topsearch-results');
   if(results) results.innerHTML = renderSearchResultsHTML(val, val.trim());
+  if(val) showTopSearchResults(); else hideTopSearchResults();
 }
 function goToSearchResult(jobId, tab){
-  closeSearch();
+  hideTopSearchResults();
+  const inp = document.getElementById('topsearch-input');
+  if(inp) inp.value = '';
   // Feature E: 'cos' (Change orders) is a search-result tab id inherited
   // from when it was a top-level tab — it now lives as the "changeorders"
   // sub-tab of Costs, so route it there instead of a dead top-level tab id.
@@ -1317,6 +1499,19 @@ let stateVersion = 0;
 let pollTimer = null;
 
 function defaultState(){ return { jobs: [], rfis: [], cos: [], issues: [], logs: [], hours: [], contacts: [], scope: [], specs: [], submittals: [], invoices: [], projectedCosts: [], schedule: [], notes: [], requests: [], elevations: [], procurement: [], ganttLogs: [], scheduleUpdates: [], engineering: [], scheduleFieldNotes: [], team: [], aar: [], gcCommLog: [], greenSheets: [], materials: [], greenSheetQuotes: [], standards: [], safetyDocs: [], weldingProcedures: [], waterTests: [], elevationMarkups: [], equipmentLog: [], dailyReports: [], postItBoards: [], meetingMinutes: [], notifications: [] }; }
+// Migration: legacy single-PM assignment (job.assignedPM, one team-member
+// id) -> multi-PM array (job.assignedPMs), mirroring how assignedForemen has
+// always worked. Called everywhere `state` gets reassigned from a fresh
+// server load (initial boot, a 409-conflict reload, and the background
+// poll) so a legacy job gets normalized the moment it's seen, however it
+// arrives. Idempotent, so harmless to call more than once.
+function migrateAssignedPMs(s){
+  (s.jobs||[]).forEach(j=>{
+    if(!Array.isArray(j.assignedPMs)) j.assignedPMs = j.assignedPM ? [j.assignedPM] : [];
+    if('assignedPM' in j) delete j.assignedPM;
+  });
+  return s;
+}
 function stateBytes(s){ return new Blob([JSON.stringify(s)]).size; }
 
 /* ===================== AUTH (shared team passcode, optional Microsoft 365 SSO) =====================
@@ -1530,10 +1725,15 @@ function applyOp(op, s){
       break;
     }
     case 'addTeamMember': s.team.push(op.member); break;
+    case 'updateTeamMember': {
+      const m = s.team.find(x=>x.id===op.id);
+      if(m) Object.assign(m, op.patch);
+      break;
+    }
     case 'deleteTeamMember': {
       s.team = s.team.filter(m=>m.id!==op.id);
       s.jobs.forEach(j=>{
-        if(j.assignedPM===op.id) j.assignedPM='';
+        if(j.assignedPMs && j.assignedPMs.includes(op.id)) j.assignedPMs = j.assignedPMs.filter(id=>id!==op.id);
         if(j.assignedForemen && j.assignedForemen.includes(op.id)) j.assignedForemen = j.assignedForemen.filter(id=>id!==op.id);
       });
       break;
@@ -2053,7 +2253,7 @@ async function doPersist(){
       // pending edits on top of it, and retry — so nobody's save silently
       // clobbers anybody else's.
       const server = await res.json();
-      state = Object.assign(defaultState(), server.state || {});
+      state = migrateAssignedPMs(Object.assign(defaultState(), server.state || {}));
       stateVersion = server.version;
       pendingQueue.forEach(op => applyOp(op));
       render();
@@ -2091,7 +2291,7 @@ function startPolling(){
       const v = Number(res.headers.get('X-State-Version')) || 0;
       if(v > stateVersion){
         const loaded = await res.json();
-        state = Object.assign(defaultState(), loaded || {});
+        state = migrateAssignedPMs(Object.assign(defaultState(), loaded || {}));
         stateVersion = v;
         render();
       }
@@ -2243,11 +2443,13 @@ function renderHome(){
     ${banner}
     <div class="home-head"><div><h2>Your jobs</h2><p>${jobs.length} ${jobs.length===state.jobs.length?'active':'assigned to you'} — tap a job to open its RFIs, change orders, cost impacts, and logs.</p></div>${newJobBtn}</div>
     <div class="job-grid">${cards}</div>
+    ${renderEngineeringManagerOverviewSection()}
     ${renderLookAhead()}
     ${renderOpsCalendarSection()}
     ${renderPMCalendarSection()}
     ${renderPMNotesOverviewSection()}
     ${renderSuperintendentScheduleSection()}
+    ${renderEngineeringCalendarSection()}
     ${renderHomeCalendar()}
     ${renderBriefing()}`;
 }
@@ -2936,14 +3138,39 @@ function renderTeamSection(){
   // PASSWORD solves for logins themselves; see README.md, "Setting up your
   // first login"). The moment one member exists, this exception closes.
   const canManageTeam = canManageLogins || members.length === 0;
-  const memberRow = (m)=>`
+  // A distinct, wider check than canManageTeam above — App Manager OR
+  // Operations Manager — for the new per-person tab-visibility settings
+  // panel (see canManageTabOverrides/openTabOverridesPanel). Does not loosen
+  // canManageTeam/canManageLogins in any way.
+  const canManageOverrides = canManageTabOverrides();
+  const memberRow = (m)=>{
+    if(ui.editingTeamMemberId === m.id){
+      return `
+      <div class="log-entry" style="display:flex; flex-direction:column; gap:8px;">
+        <div class="field-row">
+          <div class="field"><label>Name</label><input id="team-edit-name-${m.id}" value="${esc(m.name)}"></div>
+          <div class="field"><label>Role</label>
+            <select id="team-edit-role-${m.id}">${TEAM_ROLES.map(r=>`<option ${r===m.role?'selected':''}>${r}</option>`).join('')}</select>
+          </div>
+          <div class="field"><label>Work email</label><input id="team-edit-email-${m.id}" type="email" value="${esc(m.email||'')}"></div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn sm safety" onclick="submitEditTeamMember('${m.id}')">Save</button>
+          <button class="btn sm secondary" onclick="cancelEditTeamMember()">Cancel</button>
+        </div>
+      </div>`;
+    }
+    return `
       <div class="log-entry" style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
         <span style="font-weight:700; font-size:13.5px;">${esc(m.name)}${m.email ? ` <span style="font-weight:500; color:var(--text-muted);">— ${esc(m.email)}</span>` : ` <span style="font-weight:500; color:var(--safety);">— no email (can't sign in)</span>`}</span>
         <span style="display:flex; gap:6px;">
           ${(m.email && !ssoMode && canManageLogins) ? `<button class="btn sm secondary" ${disabledAttr()} onclick="openSetPasswordModal('${m.id}')" title="Set or reset this person's login password">${icon('lock')||''} Set login</button>` : ''}
+          ${canManageOverrides ? `<button class="btn sm secondary" ${disabledAttr()} onclick="openTabOverridesPanel('${m.id}')" title="Section visibility — turn tabs on/off just for this person">${icon('sliders')}</button>` : ''}
+          ${canManageTeam ? `<button class="btn sm secondary" ${disabledAttr()} onclick="startEditTeamMember('${m.id}')" title="Edit">${icon('edit')}</button>` : ''}
           ${canManageTeam ? `<button class="btn sm secondary" ${disabledAttr()} onclick="deleteTeamMember('${m.id}')">${icon('trash')}</button>` : ''}
         </span>
       </div>`;
+  };
   const tiersHtml = TEAM_ROLES.map(role=>{
     const roleMembers = members.filter(m=>m.role===role).sort((a,b)=>a.name.localeCompare(b.name));
     if(roleMembers.length===0) return '';
@@ -2981,6 +3208,78 @@ function renderTeamSection(){
     ${members.length===0 ? `<div class="issue-meta" style="padding:6px 0;">No team members added yet.</div>` : tiersHtml + otherTierHtml}`;
 }
 
+/* ---- Per-person tab visibility settings panel — App Manager / Operations
+   Manager only (see canManageTabOverrides above), reached from the sliders
+   icon on a roster row. Lists every OVERRIDABLE_TABS entry with a checkbox
+   reflecting that person's CURRENT effective visibility (their explicit
+   override if one's set, otherwise their role's default), a "(custom)" vs
+   "(role default: visible/hidden)" indicator, and a "Reset" button that
+   clears an override back to the role default entirely. Same bespoke
+   modal-overlay pattern as openElevationDetail/openDailyReportDetail
+   elsewhere in this file. */
+function openTabOverridesPanel(memberId){
+  if(!canManageTabOverrides()) return;
+  const m = state.team.find(x=>x.id===memberId);
+  if(!m) return;
+  closeModal();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.dataset.tabOverridesMemberId = memberId;
+  overlay.onclick = (e)=>{ if(e.target===overlay) closeModal(); };
+  overlay.innerHTML = tabOverridesPanelHTML(m);
+  document.body.appendChild(overlay);
+}
+function tabOverridesPanelHTML(m){
+  const overrides = m.tabOverrides || {};
+  const rows = OVERRIDABLE_TABS.map(t=>{
+    const hasOverride = Object.prototype.hasOwnProperty.call(overrides, t.key);
+    const roleDefault = roleDefaultTabAllowed(t.key, m.role);
+    const effective = hasOverride ? !!overrides[t.key] : roleDefault;
+    return `
+    <div class="log-entry" style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+      <div style="min-width:0;">
+        <div style="font-weight:700; font-size:13.5px;">${esc(t.label)}</div>
+        <div class="issue-meta">${hasOverride ? `<span style="color:var(--safety); font-weight:700;">(custom)</span>` : `(role default: ${roleDefault?'visible':'hidden'})`}</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
+        <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+          <input type="checkbox" ${effective?'checked':''} ${disabledAttr()} onchange="setTabOverride('${m.id}','${t.key}', this.checked)"> Visible
+        </label>
+        ${hasOverride ? `<button class="btn sm secondary" ${disabledAttr()} onclick="clearTabOverride('${m.id}','${t.key}')">Reset</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="modal" style="max-width:600px;">
+    <h3>Section visibility — ${esc(m.name)}</h3>
+    <p class="sub">${esc(m.role)} · these overrides apply to ${esc(m.name)} specifically, on top of their role's normal defaults — everyone else with the same role is unaffected. Toggle any section on or off just for them; "Reset" clears that override and goes back to what their role normally sees.</p>
+    ${rows}
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Done</button></div>
+  </div>`;
+}
+function refreshTabOverridesPanel(memberId){
+  const m = state.team.find(x=>x.id===memberId);
+  const overlay = document.querySelector('.modal-overlay');
+  if(overlay && m && overlay.dataset.tabOverridesMemberId===memberId) overlay.innerHTML = tabOverridesPanelHTML(m);
+}
+function setTabOverride(memberId, tabKey, visible){
+  if(!canManageTabOverrides()) return;
+  const m = state.team.find(x=>x.id===memberId);
+  if(!m) return;
+  const overrides = Object.assign({}, m.tabOverrides||{});
+  overrides[tabKey] = !!visible;
+  commit({type:'updateTeamMember', id:memberId, patch:{tabOverrides:overrides}});
+  refreshTabOverridesPanel(memberId);
+}
+function clearTabOverride(memberId, tabKey){
+  if(!canManageTabOverrides()) return;
+  const m = state.team.find(x=>x.id===memberId);
+  if(!m) return;
+  const overrides = Object.assign({}, m.tabOverrides||{});
+  delete overrides[tabKey];
+  commit({type:'updateTeamMember', id:memberId, patch:{tabOverrides:overrides}});
+  refreshTabOverridesPanel(memberId);
+}
+
 /* ---- Home: combined look-ahead across all jobs ---- */
 function collectLookAhead(){
   const items = [];
@@ -3005,7 +3304,13 @@ function collectLookAhead(){
   return visible;
 }
 function renderLookAhead(){
-  const items = collectLookAhead();
+  // Engineering Manager's home screen is engineering-focused (see renderHome)
+  // — the general Look Ahead narrows to just drafting requests for them,
+  // with the header updated so it's clear why it looks different from other
+  // roles' full four-type view.
+  const me = getEffectiveTeamMember();
+  const engOnly = !!(me && me.role==='Engineering Manager');
+  const items = engOnly ? collectLookAhead().filter(it=>it.type==='Drafting') : collectLookAhead();
   if(!items.length) return '';
   const today = todayStr();
   const rows = items.slice(0,25).map(it=>{
@@ -3032,7 +3337,7 @@ function renderLookAhead(){
     </div>`;
   }).join('');
   return `
-    <div class="section-title" style="margin-top:28px;">Look ahead — tasks needing to get done, all jobs</div>
+    <div class="section-title" style="margin-top:28px;">${engOnly ? 'Look ahead — engineering items only' : 'Look ahead — tasks needing to get done, all jobs'}</div>
     ${rows}`;
 }
 
@@ -3056,6 +3361,15 @@ function renderCalendarLegend(jobsForLegend, opts){
 }
 /* ---- Home: combined calendar across all jobs ---- */
 function renderHomeCalendar(){
+  // Operations Manager and Superintendent each get exactly one calendar on
+  // their home screen now — their own consolidated all-jobs/single-job
+  // calendar (renderRoleCalendarSection) — instead of this generic combined
+  // one stacked on top of it. Engineering Manager's home screen is a
+  // decluttered engineering-only page with its own engineering-dates-only
+  // calendar instead (renderEngineeringCalendarSection) — this generic one
+  // isn't engineering-relevant. Every other role is unchanged.
+  const me = getEffectiveTeamMember();
+  if(me && ['Operations Manager','Superintendent','Engineering Manager'].includes(me.role)) return '';
   if(state.schedule.length===0 && state.procurement.length===0 && state.requests.length===0) return '';
   const month = ui.homeMonth || currentMonthStr();
   const cells = buildMonthDays(month);
@@ -3109,6 +3423,13 @@ function shiftHomeMonth(delta){
 
 /* ---- Home: PM briefing (auto-organized, not a live chat) ---- */
 function renderBriefing(){
+  // Superintendent: not PM-relevant, and their home screen has its own
+  // consolidated calendar instead (see renderSuperintendentScheduleSection).
+  // Engineering Manager: their home screen is a decluttered engineering-only
+  // quick-access page (see renderHome's Engineering Manager section below) —
+  // the PM briefing isn't engineering-relevant either.
+  const me = getEffectiveTeamMember();
+  if(me && (me.role==='Superintendent' || me.role==='Engineering Manager')) return '';
   if(visibleJobs().length===0) return '';
   const today = todayStr();
   const lookAheadItems = collectLookAhead();
@@ -6016,18 +6337,29 @@ function renderProcurementCalendar(procurement){
    Field Team, Foremen and Superintendants... I want to make it easy for the
    field to navigate to these items." Visible to Foreman and Superintendent
    (and, since nothing restricts it away from them, every other role too —
-   see FOREMAN_ALLOWED_TABS above). Three of its five pieces are pure
-   navigation shortcuts into tabs that already exist — Elevations, Cost
-   Impacts (the Foreman-safe view, no dollar amounts), and a JHA quick-add
-   into Safety Docs — using the same "jump to another tab" pattern already
-   used elsewhere in this file (e.g. Overview's "Log monthly hours →" link
-   and "Price & CO" button, both just calling setTab()). The other two —
-   Equipment on-site tracking and Daily Reports — are new job-scoped state
-   (state.equipmentLog / state.dailyReports) that live ONLY here, saved
-   through the same generic full-state persistence path as everything else
-   (no server-side change needed — see nucleus-pwa/server/roles.js: neither
-   key is in COSTS_KEYS or CONTRACT_KEYS, so both pass through unfiltered
-   for every role, same as elevations/projectedHours in Feature C).
+   see FOREMAN_ALLOWED_TABS above).
+   Elevations and Cost Impacts are EMBEDDED directly, not linked — per Greg's
+   later request ("Take away costs and elevations on the side bar for
+   Foreman. They should have everything in their Field Tool Kit section."),
+   'elevations' and 'costs' were removed from FOREMAN_ALLOWED_TABS, so a plain
+   setTab('elevations')/setTab('costs') link from in here would now just
+   bounce a Foreman straight back out to this same tab. Instead this calls
+   the exact same render functions the standalone tabs used to use —
+   renderElevations()/renderIssues() — and inlines their output here, so
+   nothing about the Elevation tracker or Cost Impact reporting is lost; see
+   fieldKitEmbedAllowed below for the one thing that still gates whether each
+   section shows up (a per-person override, not the tab's own now-off-by-
+   default role default).
+   The JHA quick-add into Safety Docs and the Procurement shortcut are
+   unchanged pure navigation shortcuts (setTab()) — Safety Docs and
+   Procurement are still ordinary standalone tabs for a Foreman. The other
+   two pieces of this tab — Equipment on-site tracking and Daily Reports —
+   are new job-scoped state (state.equipmentLog / state.dailyReports) that
+   live ONLY here, saved through the same generic full-state persistence path
+   as everything else (no server-side change needed — see
+   nucleus-pwa/server/roles.js: neither key is in COSTS_KEYS or
+   CONTRACT_KEYS, so both pass through unfiltered for every role, same as
+   elevations/projectedHours in Feature C).
    Field Tool Kit is also FIRST in JOB_TAB_ORDER (see that comment above),
    which makes it the tab a Foreman lands on by default when opening a job —
    a deliberate choice, since fast field navigation is the entire point of
@@ -6035,6 +6367,23 @@ function renderProcurementCalendar(procurement){
 function quickAddJHA(){
   ui.safetyCategoryPrefill = 'JHA';
   setTab('safety');
+}
+// Elevations/Cost Impacts are embedded sections on this same page now (see
+// the header comment above), so their quick-link cards scroll to them
+// instead of navigating to a separate tab.
+function scrollToFieldKitSection(id){
+  const el = document.getElementById(id);
+  if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+}
+// See fieldKitEmbedAllowed's counterpart comment in the master build for the
+// full reasoning — Field Tool Kit's own default for embedding Elevations/
+// Cost Impacts is "always show it," independent of that tab key's
+// now-off-by-default role default for Foreman, with a per-person override on
+// that same key still winning either way.
+function fieldKitEmbedAllowed(tabKey){
+  const me = getEffectiveTeamMember();
+  if(me && !me.__isPreview && me.tabOverrides && Object.prototype.hasOwnProperty.call(me.tabOverrides, tabKey)) return !!me.tabOverrides[tabKey];
+  return true;
 }
 function renderFieldToolKit(job, isForeman){
   const elevations = state.elevations.filter(x=>x.jobId===job.id);
@@ -6044,19 +6393,23 @@ function renderFieldToolKit(job, isForeman){
   const incompleteElev = elevations.filter(el=>elevationPct(el)<100).length;
   const openIss = openCount(issues, job.id, ['Converted']);
   const onSiteCount = equipmentLog.filter(e=>!e.takenOff).length;
+  const showElev = fieldKitEmbedAllowed('elevations');
+  const showCosts = fieldKitEmbedAllowed('costs');
 
   const quickLinks = `
     <div class="job-grid" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); margin-bottom:26px;">
-      <div class="job-card" onclick="setTab('elevations')">
+      ${showElev ? `
+      <div class="job-card" onclick="scrollToFieldKitSection('fk-elevations')">
         <div class="fieldkit-card-icon">${icon('buildingSkyscraper')}</div>
         <h3>Elevations</h3>
         <div class="job-meta">${incompleteElev} not yet complete</div>
-      </div>
-      <div class="job-card" onclick="setTab('costs')">
+      </div>` : ''}
+      ${showCosts ? `
+      <div class="job-card" onclick="scrollToFieldKitSection('fk-costs')">
         <div class="fieldkit-card-icon">${icon('camera')}</div>
         <h3>Cost Impacts</h3>
         <div class="job-meta">${openIss} open — report damage or an inefficiency</div>
-      </div>
+      </div>` : ''}
       <div class="job-card" onclick="quickAddJHA()">
         <div class="fieldkit-card-icon">${icon('shield')}</div>
         <h3>Add a JHA</h3>
@@ -6108,10 +6461,19 @@ function renderFieldToolKit(job, isForeman){
 
   return `
     <div class="panel-head"><h3>Field Tool Kit</h3></div>
-    <div class="issue-meta" style="margin-bottom:12px;">Fast navigation for the field — jump straight to Elevations, Cost Impacts, Procurement, or quick-add a JHA, plus track equipment on-site and log daily reports right here.</div>
+    <div class="issue-meta" style="margin-bottom:12px;">Everything the field needs in one place — full Elevations and Cost Impacts below, plus quick-add a JHA, jump to Procurement, track equipment on-site, and log daily reports right here.</div>
     ${quickLinks}
 
-    <div class="panel-head"><h3>Equipment on-site</h3></div>
+    ${showElev ? `
+    <div id="fk-elevations">${renderElevations(elevations)}</div>` : ''}
+
+    ${showCosts ? `
+    <div id="fk-costs" style="margin-top:28px;">
+      <div class="panel-head"><h3>Cost Impacts</h3></div>
+      ${renderIssues(job, issues, isForeman)}
+    </div>` : ''}
+
+    <div class="panel-head" style="margin-top:28px;"><h3>Equipment on-site</h3></div>
     <div class="co-summary" style="margin-bottom:14px;">
       <div class="row total"><span>Currently on-site</span><span>${onSiteCount} item${onSiteCount===1?'':'s'}</span></div>
     </div>
@@ -6572,9 +6934,7 @@ function modalHTML(type){
         <div class="field"><label>Bid hours — Field</label><input type="number" id="f-bhf" value="${job.bidHoursField!=null?job.bidHoursField:''}" placeholder="0"></div>
         <div class="field"><label>Bid hours — Shop</label><input type="number" id="f-bhs" value="${job.bidHoursShop!=null?job.bidHoursShop:''}" placeholder="0"></div>
       </div>
-      <div class="field"><label>Assigned Project Manager</label>
-        <select id="f-assignedpm">${assignedPmOptionsHTML(job.assignedPM||'')}</select>
-      </div>
+      <div class="issue-meta" style="margin-top:-6px;">PM and Foreman assignment now live on the job card on the home screen, not here.</div>
       <div class="err" id="f-err"></div>
       <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Cancel</button>
       <button class="btn safety" onclick="submitBudget()">Save</button></div>
@@ -7949,7 +8309,7 @@ function submitRequest(){
   const reqJob = getJob(ui.jobId);
   if(reqJob){
     const creator = getCurrentTeamMember();
-    notifyMembers([reqJob.assignedPM, ...(reqJob.assignedForemen||[])], {
+    notifyMembers([...(reqJob.assignedPMs||[]), ...(reqJob.assignedForemen||[])], {
       creatorId: creator ? creator.id : null,
       type: 'pmRequest', jobId: ui.jobId, refId: entry.id,
       message: `New PM Request For Field on ${ui.jobId}: "${title}"`
@@ -8024,7 +8384,7 @@ function submitJob(){
   const address = document.getElementById('f-address').value.trim();
   const bhf = document.getElementById('f-bhf').value;
   const bhs = document.getElementById('f-bhs').value;
-  const assignedPM = document.getElementById('f-assignedpm') ? document.getElementById('f-assignedpm').value : '';
+  const pickedPM = document.getElementById('f-assignedpm') ? document.getElementById('f-assignedpm').value : '';
   if(!/^[A-Z]{4}$/.test(id)) return showErr('Job ID must be exactly 4 letters.');
   if(state.jobs.some(j=>j.id===id)) return showErr('That Job ID is already in use.');
   if(!name) return showErr('Job name is required.');
@@ -8032,7 +8392,10 @@ function submitJob(){
     id, name, status, gc, address,
     bidHoursField: bhf===''?null:Number(bhf),
     bidHoursShop: bhs===''?null:Number(bhs),
-    assignedPM,
+    // Job creation keeps its single "Assign PM" picker for the initial pick
+    // only — ongoing PM assignment (like Foremen) is multi-select, added
+    // afterward via the job card. See addJobPM/jobCardAssignHTML.
+    assignedPMs: [pickedPM].filter(Boolean),
     assignedForemen: []
   }});
   closeModal();
@@ -8063,8 +8426,6 @@ function submitBudget(){
     bidHoursField: bhf===''?null:Number(bhf),
     bidHoursShop: bhs===''?null:Number(bhs)
   });
-  const pmSel = document.getElementById('f-assignedpm');
-  if(pmSel) patch.assignedPM = pmSel.value || '';
   if(Object.keys(patch).length) commit({type:'updateJob', id: ui.jobId, patch});
   closeModal();
 }
@@ -8290,8 +8651,8 @@ function submitIssue(){
   // adding one themselves doesn't need to notify themselves.
   if(me && me.role==='Foreman'){
     const issJob = getJob(ui.jobId);
-    if(issJob && issJob.assignedPM){
-      notifyMembers([issJob.assignedPM], {
+    if(issJob && (issJob.assignedPMs||[]).length){
+      notifyMembers(issJob.assignedPMs, {
         creatorId: me.id, type: 'costImpact', jobId: ui.jobId, refId: entry.id,
         message: `New Cost Impact reported from the field on ${ui.jobId}: ${entry.category}`
       });
@@ -8371,12 +8732,12 @@ function render(){
   updateTeamDropdown();
   updateViewAsControl();
   updateNotificationsControl();
+  updateSearchScopeControl();
 }
 
 async function boot(){
   await checkAuthMode();
   if(!getAuthToken()){ showLoginGate(); return; }
-  updateViewModeButton();
   document.getElementById('app').innerHTML = `<div class="empty">${icon('loader2','spin')}Loading job data…</div>`;
   readOnly = false;
   let loaded = null;
@@ -8408,7 +8769,7 @@ async function boot(){
     showLoginGate();
     return;
   }
-  state = Object.assign(defaultState(), loaded || {});
+  state = migrateAssignedPMs(Object.assign(defaultState(), loaded || {}));
   if(verifiedIdentity && verifiedIdentity.matched && verifiedIdentity.teamMemberId){
     // Real, verified identity replaces the self-picked "You" dropdown.
     currentTeamMemberId = verifiedIdentity.teamMemberId;
@@ -8454,6 +8815,24 @@ boot();
 
 /* ===================== FEATURE-PARITY ADDITIONS (ported from master nucleus/index.html) ===================== */
 
+// Multi-PM assignment (mirrors Foremen below) — ongoing PM assignment lives
+// on the job card as removable chips + an "+ Add PM" select, same pattern as
+// Foremen; assignedPmOptionsHTML above stays single-select, used only by the
+// job-creation modal's initial pick now (see submitJob).
+function addJobPM(jobId, pmId){
+  if(!pmId) return;
+  const job = getJob(jobId);
+  if(!job) return;
+  const current = job.assignedPMs || [];
+  if(current.includes(pmId)) return;
+  commit({type:'updateJob', id: jobId, patch:{assignedPMs: [...current, pmId]}});
+}
+function removeJobPM(jobId, pmId){
+  const job = getJob(jobId);
+  if(!job) return;
+  const current = job.assignedPMs || [];
+  commit({type:'updateJob', id: jobId, patch:{assignedPMs: current.filter(id=>id!==pmId)}});
+}
 function addJobForeman(jobId, foremanId){
   if(!foremanId) return;
   const job = getJob(jobId);
@@ -8544,6 +8923,20 @@ function collectJobLogEntries(jobId, hideFieldLogs){
    people. Wrapped so clicks inside it never bubble up to the card's own
    onclick="openJob(...)" . */
 function jobCardAssignHTML(job){
+  const pms = state.team.filter(m=>m.role==='Project Manager').slice().sort((a,b)=>a.name.localeCompare(b.name));
+  const assignedPmIds = job.assignedPMs || [];
+  const pmChips = assignedPmIds.map(id=>{
+    const m = state.team.find(t=>t.id===id);
+    if(!m) return '';
+    return `<span class="foreman-chip">${esc(m.name)}${readOnly ? '' : `<button type="button" title="Remove ${esc(m.name)}" onclick="event.stopPropagation(); removeJobPM('${job.id}','${id}')">${icon('x')}</button>`}</span>`;
+  }).join('');
+  const availablePms = pms.filter(m=>!assignedPmIds.includes(m.id));
+  const addPmSelect = (!readOnly && availablePms.length)
+    ? `<select onclick="event.stopPropagation()" onchange="event.stopPropagation(); addJobPM('${job.id}', this.value); this.value='';" ${disabledAttr()}>
+        <option value="">+ Add PM</option>${availablePms.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')}
+      </select>`
+    : '';
+  const noPms = pms.length===0;
   const foremen = state.team.filter(m=>m.role==='Foreman').slice().sort((a,b)=>a.name.localeCompare(b.name));
   const assignedIds = job.assignedForemen || [];
   const chips = assignedIds.map(id=>{
@@ -8561,7 +8954,7 @@ function jobCardAssignHTML(job){
   return `<div class="job-card-assign" onclick="event.stopPropagation()">
     <div class="job-card-assign-row">
       <span class="l">PM</span>
-      <select onclick="event.stopPropagation()" onchange="event.stopPropagation(); updateJobPM('${job.id}', this.value)" ${disabledAttr()}>${assignedPmOptionsHTML(job.assignedPM||'')}</select>
+      <div class="chip-row">${pmChips}${addPmSelect}${!pmChips && noPms ? '<span class="job-card-assign-empty">Add PMs on the Team section below</span>' : ''}</div>
     </div>
     <div class="job-card-assign-row">
       <span class="l">Foremen</span>
@@ -8695,53 +9088,93 @@ function renderAllLogsPage(job, isForeman){
     ${filtered.length===0 ? emptyBlock('notebook', all.length===0 ? 'Nothing logged on this job yet.' : 'Nothing matches this filter.') : rows}`;
 }
 
-function renderOpsCalendarSection(){
-  const me = getEffectiveTeamMember();
-  if(!me || me.role!=='Operations Manager') return '';
+/* ---- Shared consolidated home-screen calendar for Operations Manager and
+   Superintendent — each gets exactly ONE calendar on their home screen (see
+   renderHomeCalendar's role gate, which hides the old generic combined
+   calendar for both of them), with two toggles instead of the old
+   fixed views:
+     - scope: "All jobs" (aggregate, job-color-coded chips, default) or one
+       individual job (same per-job picker Operations already had).
+     - type: Field Install Schedule vs. Material Procurement Schedule
+       (Operations already had this; Superintendent gets it new).
+   All-jobs + Field keeps the per-day total-crew badge (summed manpower)
+   that the Superintendent's old all-jobs view had — carried into
+   Operations' all-jobs+Field view too for the same manpower-conflict-
+   spotting value. One parameterized renderer shared by both roles; each
+   role's own thin wrapper just supplies its own ui state keys/setters/
+   title and does its own role gate. */
+function renderRoleCalendarSection(opts){
   const jobs = state.jobs.slice().sort((a,b)=>a.id.localeCompare(b.id));
   if(jobs.length===0) return '';
-  const job = getJob(ui.opsCalJobId) || jobs[0];
-  const mode = ui.opsCalMode || 'field';
-  const month = ui.opsCalMonth || currentMonthStr();
-  const tasks = state.schedule.filter(t=>t.jobId===job.id);
-  const procurement = state.procurement.filter(p=>p.jobId===job.id);
+  const job = opts.jobId ? getJob(opts.jobId) : null;
+  const allJobs = !job; // also covers a jobId pointing at a since-deleted job
+  const mode = opts.mode || 'field';
+  const month = opts.month || currentMonthStr();
   const cells = buildMonthDays(month);
   const today = todayStr();
   const dayHeaders = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div class="cal-dowhead">${d}</div>`).join('');
   const cellsHtml = cells.map(dateStr=>{
     if(!dateStr) return `<div class="cal-cell empty-cell"></div>`;
     const dnum = Number(dateStr.slice(8,10));
-    let chips = '';
+    let chips = '', crewBadge = '';
     if(mode==='field'){
-      const dayTasks = tasks.filter(t=> t.status!=='Complete' && t.currentStart && dateStr >= t.currentStart && dateStr <= addDaysStr(t.currentStart, Math.max(1,t.duration||1)-1));
-      chips = dayTasks.map(t=>`<div class="cal-chip click-only status-${(t.status||'').replace(/\s+/g,'-').toLowerCase()}" onclick="openJob('${job.id}','schedule'); openTaskDetail('${t.id}')" title="${esc(t.name)} — ${t.manpower||0} crew, ${t.duration||0}d">${esc(t.name)}${t.manpower?' · '+t.manpower+' crew':''}</div>`).join('');
+      const dayTasks = state.schedule.filter(t=> (allJobs || t.jobId===job.id) && t.status!=='Complete' && t.currentStart && dateStr >= t.currentStart && dateStr <= addDaysStr(t.currentStart, Math.max(1,t.duration||1)-1));
+      if(allJobs){
+        const totalCrew = dayTasks.reduce((s,t)=>s+(Number(t.manpower)||0),0);
+        if(totalCrew>0) crewBadge = `<div class="cal-daycount" title="Total crew scheduled across all jobs">${totalCrew}</div>`;
+        chips = dayTasks.map(t=>{
+          const j = getJob(t.jobId);
+          const label = `${j?j.id+': ':''}${t.name}`;
+          return `<div class="cal-chip click-only job-chip status-${(t.status||'').replace(/\s+/g,'-').toLowerCase()}" onclick="openJob('${t.jobId}','schedule'); openTaskDetail('${t.id}')" title="${esc(label)} — ${t.manpower||0} crew, ${t.duration||0}d"><span class="cal-jobdot" style="background:${jobColor(t.jobId)};"></span>${esc(label)}${t.manpower?' · '+t.manpower:''}</div>`;
+        }).join('');
+      } else {
+        chips = dayTasks.map(t=>`<div class="cal-chip click-only status-${(t.status||'').replace(/\s+/g,'-').toLowerCase()}" onclick="openJob('${job.id}','schedule'); openTaskDetail('${t.id}')" title="${esc(t.name)} — ${t.manpower||0} crew, ${t.duration||0}d">${esc(t.name)}${t.manpower?' · '+t.manpower+' crew':''}</div>`).join('');
+      }
     } else {
-      const dayProc = procurement.filter(p=> p.status!=='Delivered' && p.neededBy===dateStr);
-      chips = dayProc.map(p=>`<div class="cal-chip click-only proc-chip${needsOrderingSoon(p)?' proc-chip-urgent':''}" onclick="openJob('${job.id}','procurement')" title="${esc(p.item)} — needed ${dateStr}${p.vendor?' · '+esc(p.vendor):''} · ${esc(p.status)}">${icon('truck')}${esc(p.item)}</div>`).join('');
+      const dayProc = state.procurement.filter(p=> (allJobs || p.jobId===job.id) && p.status!=='Delivered' && p.neededBy===dateStr);
+      chips = dayProc.map(p=>{
+        const j = getJob(p.jobId);
+        const label = `${allJobs && j ? j.id+': ' : ''}${p.item}`;
+        return `<div class="cal-chip click-only proc-chip${needsOrderingSoon(p)?' proc-chip-urgent':''}"${allJobs?` style="border-left:4px solid ${jobColor(p.jobId)};"`:''} onclick="openJob('${p.jobId}','procurement')" title="${esc(label)} — needed ${dateStr}${p.vendor?' · '+esc(p.vendor):''} · ${esc(p.status)}">${icon('truck')}${esc(label)}</div>`;
+      }).join('');
     }
     return `<div class="cal-cell${dateStr===today?' cal-today':''}">
-      <div class="cal-daynum">${dnum}</div>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div class="cal-daynum">${dnum}</div>
+        ${crewBadge}
+      </div>
       ${chips}
     </div>`;
   }).join('');
   return `
-    <div class="panel-head" style="margin-top:28px;"><h3>Job calendar — Operations</h3>
+    <div class="panel-head" style="margin-top:28px;"><h3>${opts.title}</h3>
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-        <select id="ops-cal-job" onchange="setOpsCalJob(this.value)">
-          ${jobs.map(j=>`<option value="${j.id}" ${j.id===job.id?'selected':''}>${j.id} — ${esc(j.name)}</option>`).join('')}
+        <select onchange="${opts.jobIdSetter}(this.value)">
+          <option value="" ${allJobs?'selected':''}>All jobs</option>
+          ${jobs.map(j=>`<option value="${j.id}" ${!allJobs && j.id===job.id?'selected':''}>${j.id} — ${esc(j.name)}</option>`).join('')}
         </select>
-        <button class="btn sm secondary" onclick="shiftOpsCalMonth(-1)">${icon('arrowLeft')}</button>
+        <button class="btn sm secondary" onclick="${opts.monthShifter}(-1)">${icon('arrowLeft')}</button>
         <span style="align-self:center; font-family:var(--mono); font-size:12.5px; min-width:110px; text-align:center;">${monthLabel(month)}</span>
-        <button class="btn sm secondary" onclick="shiftOpsCalMonth(1)">${icon('arrowRight')}</button>
+        <button class="btn sm secondary" onclick="${opts.monthShifter}(1)">${icon('arrowRight')}</button>
       </div>
     </div>
-    <div class="issue-meta" style="margin-bottom:6px;">Showing ${esc(job.name)} only, so it doesn't get crowded with every job's dates at once — switch jobs above, or see everything combined in the calendar further down.</div>
+    <div class="issue-meta" style="margin-bottom:6px;">${allJobs ? 'Every job combined, color-coded by job — pick a single job above to focus on just that one.' : `Showing ${esc(job.name)} only — switch back to "All jobs" above to see everything combined.`}</div>
     <div class="subtabs">
-      <div class="subtab ${mode==='field'?'active':''}" onclick="setOpsCalMode('field')">Field Install Schedule</div>
-      <div class="subtab ${mode==='material'?'active':''}" onclick="setOpsCalMode('material')">Material Procurement Schedule</div>
+      <div class="subtab ${mode==='field'?'active':''}" onclick="${opts.modeSetter}('field')">Field Install Schedule</div>
+      <div class="subtab ${mode==='material'?'active':''}" onclick="${opts.modeSetter}('material')">Material Procurement Schedule</div>
     </div>
     <div class="cal-grid cal-grid-lg">${dayHeaders}${cellsHtml}</div>
+    ${allJobs ? renderCalendarLegend(jobs, {}) : ''}
   `;
+}
+function renderOpsCalendarSection(){
+  const me = getEffectiveTeamMember();
+  if(!me || me.role!=='Operations Manager') return '';
+  return renderRoleCalendarSection({
+    jobId: ui.opsCalJobId, month: ui.opsCalMonth, mode: ui.opsCalMode,
+    jobIdSetter: 'setOpsCalJob', modeSetter: 'setOpsCalMode', monthShifter: 'shiftOpsCalMonth',
+    title: 'Job calendar — Operations'
+  });
 }
 
 
@@ -8865,42 +9298,90 @@ function renderStandardsPage(){
     ${renderStandardsSection()}`;
 }
 
+/* ---- Superintendent's home-screen calendar — see renderRoleCalendarSection
+   above (with Operations) for the shared implementation. Superintendent
+   isn't restricted to assigned jobs (unlike PM/Foreman — see isJobVisible),
+   so "All jobs" naturally already covers every job with no extra filtering.
+   Month reuses ui.superSchedMonth (pre-existing key) rather than a
+   redundant new one. */
+function setSuperCalJob(jobId){ ui.superCalJobId = jobId; render(); }
+function setSuperCalMode(mode){ ui.superCalMode = mode; render(); }
 function renderSuperintendentScheduleSection(){
   const me = getEffectiveTeamMember();
   if(!me || me.role!=='Superintendent') return '';
+  return renderRoleCalendarSection({
+    jobId: ui.superCalJobId, month: ui.superSchedMonth, mode: ui.superCalMode,
+    jobIdSetter: 'setSuperCalJob', modeSetter: 'setSuperCalMode', monthShifter: 'shiftSuperSchedMonth',
+    title: 'Job calendar — Superintendent'
+  });
+}
+
+/* ---- Engineering Manager's home screen: a quick-access, engineering-only
+   page instead of the generic home layout. Reuses the existing "Engineering
+   — all jobs overview" (Kanban-style per-job status counts + Engineer look
+   ahead list, renderEngineeringOverview/renderEngineeringLookAhead) which
+   used to be reachable only from inside one job's own Engineering tab —
+   surfaced here near the top of the home screen instead, for fast access
+   without opening a job first. Not PM/Foreman-restricted (Engineering
+   Manager sees every job, like Superintendent/Ops), so renderEngineeringOverview's
+   own visibleJobs() call naturally already covers everything. Paired with
+   renderLookAhead's Drafting-only filter and renderEngineeringCalendarSection
+   below, plus renderHomeCalendar/renderBriefing being hidden for this role
+   too (see their own gates) — together this keeps the Engineering Manager's
+   home screen genuinely decluttered down to engineering-relevant content. */
+function renderEngineeringManagerOverviewSection(){
+  const me = getEffectiveTeamMember();
+  if(!me || me.role!=='Engineering Manager') return '';
+  return `<div style="margin-bottom:8px;">${renderEngineeringOverview(null)}</div>`;
+}
+/* ---- Engineering Manager's home-screen calendar: only engineering
+   drafting-request dates (dateNeeded), across every job, job-color-coded
+   like the other multi-job calendars — no field-schedule or procurement
+   chips at all, since this page is specifically about engineering. Tapping
+   a chip opens that job's Engineering tab and the specific drafting request
+   (openEngineeringDetail, same as Engineer look ahead's own rows use). No
+   scope/type toggle needed — there's only ever one kind of date to show. */
+function shiftEngCalMonth(delta){
+  const month = ui.engCalMonth || currentMonthStr();
+  const [y,m] = month.split('-').map(Number);
+  const d = new Date(y, m-1+delta, 1);
+  ui.engCalMonth = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  render();
+}
+function renderEngineeringCalendarSection(){
+  const me = getEffectiveTeamMember();
+  if(!me || me.role!=='Engineering Manager') return '';
   if(state.jobs.length===0) return '';
-  const month = ui.superSchedMonth || currentMonthStr();
+  const month = ui.engCalMonth || currentMonthStr();
   const cells = buildMonthDays(month);
   const today = todayStr();
   const dayHeaders = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div class="cal-dowhead">${d}</div>`).join('');
+  const jobs = state.jobs.slice().sort((a,b)=>a.id.localeCompare(b.id));
   const cellsHtml = cells.map(dateStr=>{
     if(!dateStr) return `<div class="cal-cell empty-cell"></div>`;
     const dnum = Number(dateStr.slice(8,10));
-    const dayTasks = state.schedule.filter(t=> t.status!=='Complete' && t.currentStart && dateStr >= t.currentStart && dateStr <= addDaysStr(t.currentStart, Math.max(1,t.duration||1)-1));
-    const totalCrew = dayTasks.reduce((s,t)=>s+(Number(t.manpower)||0),0);
-    const chips = dayTasks.map(t=>{
-      const job = getJob(t.jobId);
-      const label = `${job?job.id+': ':''}${t.name}`;
-      return `<div class="cal-chip click-only job-chip status-${(t.status||'').replace(/\s+/g,'-').toLowerCase()}" onclick="openJob('${t.jobId}','schedule'); openTaskDetail('${t.id}')" title="${esc(label)} — ${t.manpower||0} crew, ${t.duration||0}d"><span class="cal-jobdot" style="background:${jobColor(t.jobId)};"></span>${esc(label)}${t.manpower?' · '+t.manpower:''}</div>`;
+    const dayItems = state.engineering.filter(e=> e.status!=='Done' && e.dateNeeded===dateStr);
+    const chips = dayItems.map(e=>{
+      const job = getJob(e.jobId);
+      const label = `${job?job.id+': ':''}${e.title}`;
+      return `<div class="cal-chip click-only job-chip status-${(e.status||'').replace(/\s+/g,'-').toLowerCase()}" onclick="openJob('${e.jobId}','engineering'); openEngineeringDetail('${e.id}')" title="${esc(label)}"><span class="cal-jobdot" style="background:${jobColor(e.jobId)};"></span>${esc(label)}</div>`;
     }).join('');
     return `<div class="cal-cell${dateStr===today?' cal-today':''}">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <div class="cal-daynum">${dnum}</div>
-        ${totalCrew>0?`<div class="cal-daycount" title="Total crew scheduled across all jobs">${totalCrew}</div>`:''}
-      </div>
+      <div class="cal-daynum">${dnum}</div>
       ${chips}
     </div>`;
   }).join('');
   return `
-    <div class="panel-head" style="margin-top:28px;"><h3>All Field Activities — every job</h3>
+    <div class="panel-head" style="margin-top:28px;"><h3>Engineering calendar — drafting dates, all jobs</h3>
       <div style="display:flex; gap:8px;">
-        <button class="btn sm secondary" onclick="shiftSuperSchedMonth(-1)">${icon('arrowLeft')}</button>
+        <button class="btn sm secondary" onclick="shiftEngCalMonth(-1)">${icon('arrowLeft')}</button>
         <span style="align-self:center; font-family:var(--mono); font-size:12.5px; min-width:110px; text-align:center;">${monthLabel(month)}</span>
-        <button class="btn sm secondary" onclick="shiftSuperSchedMonth(1)">${icon('arrowRight')}</button>
+        <button class="btn sm secondary" onclick="shiftEngCalMonth(1)">${icon('arrowRight')}</button>
       </div>
     </div>
-    <div class="issue-meta" style="margin-bottom:6px;">Every scope going across every job this month, color-coded by job, with total crew scheduled each day — tap a task to open it and adjust manpower.</div>
+    <div class="issue-meta" style="margin-bottom:6px;">Every open drafting request's date needed, across every job, color-coded by job — tap a chip to jump straight to that request.</div>
     <div class="cal-grid cal-grid-lg">${dayHeaders}${cellsHtml}</div>
+    ${renderCalendarLegend(jobs, {})}
   `;
 }
 
@@ -9114,10 +9595,6 @@ function toggleTeamDropdown(){
 
 function updateCoHeaderField(coId, field, value){
   commit({type:'updateCoHeader', coId, field, value});
-}
-
-function updateJobPM(jobId, pmId){
-  commit({type:'updateJob', id: jobId, patch:{assignedPM: pmId || ''}});
 }
 
 function updateTeamDropdown(){
