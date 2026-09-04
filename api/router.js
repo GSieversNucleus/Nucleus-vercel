@@ -20,8 +20,60 @@ const crypto = require('crypto');
 const store = require('../lib/store');
 const auth = require('../lib/auth');
 const roles = require('../lib/roles');
+const webpush = require('../lib/webpush');
 
 const MAX_BODY_BYTES = 20 * 1024 * 1024; // 20MB — matches the app's own MAX_STATE_BYTES headroom
+
+// ---- Push notifications: a real phone/tablet alert for a cost impact or
+// request assigned to you, even with Nucleus closed — see lib/webpush.js
+// for how this is sent (RFC 8291/8292, Node's own crypto only, no paid
+// service or npm dependency, identical to the Render build). Needs one
+// VAPID keypair, generated once (run `node generate-vapid-keys.js`) and set
+// as these two env vars in Vercel's project settings — see .env.example.
+// Missing either one just means push is unavailable; nothing else about
+// the app depends on it. ----
+const vapidKeys = (process.env.NUCLEUS_VAPID_PUBLIC_KEY && process.env.NUCLEUS_VAPID_PRIVATE_KEY)
+  ? { publicKey: process.env.NUCLEUS_VAPID_PUBLIC_KEY, privateKey: process.env.NUCLEUS_VAPID_PRIVATE_KEY }
+  : null;
+const VAPID_SUBJECT = 'mailto:' + (process.env.NUCLEUS_ADMIN_EMAIL || 'notifications@example.com');
+function notificationPushTitle(type) {
+  return type === 'costImpact' ? 'Nucleus — Cost impact' : 'Nucleus — Request';
+}
+// Called right after a state save succeeds, comparing the notifications
+// array before and after to find entries that are genuinely new (not just
+// re-saved unchanged), then pushing to every device the recipient has
+// subscribed on. A subscription the push service reports gone (404/410) is
+// removed so nothing keeps retrying it forever; any other failure is logged
+// and otherwise ignored — one bad send must never affect the save itself
+// (already committed by the time this runs) or anyone else's push. Same
+// logic as the Render build's server/index.js, swapping its in-memory
+// pushSubs Map for store.js's Redis-backed one — but AWAITED by its caller
+// here rather than fire-and-forget, since a serverless function's process
+// can be torn down right after its response is sent (see the call site).
+async function notifyNewPushNotifications(oldNotifications, newNotifications) {
+  if (!vapidKeys) return;
+  const oldIds = new Set((oldNotifications || []).map((n) => n.id));
+  const added = (newNotifications || []).filter((n) => !oldIds.has(n.id));
+  if (added.length === 0) return;
+  const subs = await store.loadPushSubs();
+  for (const n of added) {
+    const matches = Object.entries(subs).filter(([, sub]) => sub.teamMemberId === n.recipientMemberId);
+    if (matches.length === 0) continue;
+    const payload = { title: notificationPushTitle(n.type), body: n.message, jobId: n.jobId, refId: n.refId, notifType: n.type };
+    for (const [endpoint, sub] of matches) {
+      try {
+        const result = await webpush.sendWebPush({ endpoint, keys: sub.keys }, payload, vapidKeys, { subject: VAPID_SUBJECT });
+        if (result.gone) {
+          await store.removePushSub(endpoint);
+        } else if (!result.ok) {
+          console.warn('Push send failed for', endpoint, '-', result.error);
+        }
+      } catch (e) {
+        console.error('Push send threw for', endpoint, e);
+      }
+    }
+  }
+}
 
 // ---- One-time-per-instance admin bootstrap. A serverless instance can be
 // reused across several requests before it's recycled, so this only needs
@@ -286,6 +338,49 @@ module.exports = async (req, res) => {
       }
     }
 
+    // ---- Push notifications: subscribe/unsubscribe one browser installation.
+    // The public key has nothing to protect (it's handed to every browser
+    // that subscribes anyway), so it's readable without signing in — the
+    // subscribe/unsubscribe actions themselves still require a real session,
+    // since a subscription is tied to one team member. ----
+    if (req.method === 'GET' && url === '/api/push/vapid-public-key') {
+      if (!vapidKeys) return sendJSON(res, 404, { error: 'push_not_configured' });
+      return sendJSON(res, 200, { publicKey: vapidKeys.publicKey });
+    }
+
+    if (req.method === 'POST' && url === '/api/push/subscribe') {
+      if (!vapidKeys) return sendJSON(res, 404, { error: 'push_not_configured' });
+      const identity0 = await store.getSession(getBearerToken(req));
+      if (!identity0) return sendJSON(res, 401, { error: 'not_authenticated' });
+      let body;
+      try { body = await readJSONBody(req); }
+      catch (e) { return sendJSON(res, e.code === 'too_large' ? 413 : 400, { error: e.code || 'bad_request' }); }
+      const sub = body && body.subscription;
+      if (!sub || !sub.endpoint || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) {
+        return sendJSON(res, 400, { error: 'bad_subscription' });
+      }
+      const doc = await store.readState();
+      const identity = resolveIdentity(identity0, doc.state);
+      await store.addPushSub(sub.endpoint, {
+        teamMemberId: identity.teamMemberId,
+        keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth },
+        userAgent: String((body && body.userAgent) || req.headers['user-agent'] || '').slice(0, 300),
+        createdAt: Date.now()
+      });
+      return sendJSON(res, 200, { ok: true });
+    }
+
+    if (req.method === 'POST' && url === '/api/push/unsubscribe') {
+      const identity0 = await store.getSession(getBearerToken(req));
+      if (!identity0) return sendJSON(res, 401, { error: 'not_authenticated' });
+      let body;
+      try { body = await readJSONBody(req); }
+      catch (e) { return sendJSON(res, e.code === 'too_large' ? 413 : 400, { error: e.code || 'bad_request' }); }
+      const endpoint = body && body.endpoint;
+      if (endpoint) await store.removePushSub(endpoint);
+      return sendJSON(res, 200, { ok: true });
+    }
+
     if (url === '/data/state.json' || url === '/api/state') {
       const token = getBearerToken(req);
       const identity = await store.getSession(token);
@@ -322,6 +417,17 @@ module.exports = async (req, res) => {
           // version mismatch, just caught one step later.
           const outState = roles.filterStateForRole(result.state, role);
           return sendJSON(res, 409, { version: result.version, state: outState });
+        }
+        // The state save itself is already committed at this point — a push
+        // failure below can never undo or affect it. This IS awaited (unlike
+        // the Render build's genuinely fire-and-forget call), because a
+        // serverless function's process can be frozen or torn down the
+        // moment its response finishes, unlike Render's always-on process —
+        // an un-awaited call here could simply never run to completion.
+        try {
+          await notifyNewPushNotifications(doc.state.notifications || [], mergedState.notifications || []);
+        } catch (e) {
+          console.error('notifyNewPushNotifications failed:', e);
         }
         return sendJSON(res, 200, { version: result.version });
       }
