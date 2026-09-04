@@ -2797,7 +2797,7 @@ function removeStandardAttachment(event, idx){
      state.postItBoards = [{
        ownerId: 'TM-003' | 'shared',
        columns: [ {id, name} ],                 // user-defined, any order/count
-       notes: [ {id, columnId, text, color, type, jobId, author, date} ]
+       notes: [ {id, columnId, text, color, type, jobId, author, date, dueDate} ]
      }]
    `type` (Discuss/Call/Order/Important/General) and `jobId` are only ever
    set when the effective identity (View-As-aware, since this part IS a
@@ -2806,7 +2806,20 @@ function removeStandardAttachment(event, idx){
    notes just carry plain text, type/jobId stay blank. Drag-and-drop between
    columns reuses the exact same ondragstart/ondragover/ondrop mechanics as
    the Engineering and Schedule Kanban boards (see onEngCardDragStart /
-   onEngColumnDrop above) rather than new drag logic. ---- */
+   onEngColumnDrop above) rather than new drag logic.
+   `date` (set once, at creation, to todayStr()) and `dueDate` (blank until
+   set) are NOT Ops-Manager-gated like type/jobId above — Greg: "add a time
+   stamp on when created and an option to add a due date" was a request
+   about the board in general, not that one role's workflow, so every
+   note on every identity's board gets both. `date` is editable after the
+   fact via an inline <input type=date>, same pattern as the per-job Notes
+   list's own date field (see renderNotes/updateNoteDate) — post-its can
+   sit around for a while before being filled in, same reasoning. `dueDate`
+   is optional and clearable (an empty value just removes it, unlike
+   `date` which a note must always carry); when set, the note shows a
+   Look-Ahead-style days-out/overdue badge (see renderLookAhead's dueCls
+   for the identical ok/warn/over threshold logic, reused rather than
+   redefined). ---- */
 const POSTIT_TYPES = ['Discuss','Call','Order','Important','General'];
 function openPostitPage(){ ui.view='postit'; render(); }
 function renderPostitPage(){
@@ -2850,7 +2863,7 @@ function addPostitNote(colId){
   const note = {
     id: nextPostitId('PNOTE'), columnId: colId, text: 'New note',
     type: isOpsMgr ? 'General' : '', jobId: '',
-    author: currentUserName || (me && me.name) || '', date: todayStr()
+    author: currentUserName || (me && me.name) || '', date: todayStr(), dueDate: ''
   };
   commit({type:'addPostitNote', ownerId: postitOwnerId(), note});
 }
@@ -2862,6 +2875,18 @@ function updatePostitNoteType(noteId, value){
 }
 function updatePostitNoteJob(noteId, value){
   commit({type:'updatePostitNote', ownerId: postitOwnerId(), noteId, patch:{jobId: value}});
+}
+// Created-date is editable after the fact (see the big comment above) but a
+// note must always carry one, same rule updateNoteDate already enforces for
+// the per-job Notes list.
+function updatePostitNoteDate(noteId, value){
+  if(!value) return;
+  commit({type:'updatePostitNote', ownerId: postitOwnerId(), noteId, patch:{date: value}});
+}
+// Due date is optional — an empty value is a valid, meaningful patch here
+// (it clears the due date), unlike updatePostitNoteDate above.
+function updatePostitNoteDueDate(noteId, value){
+  commit({type:'updatePostitNote', ownerId: postitOwnerId(), noteId, patch:{dueDate: value||''}});
 }
 function deletePostitNote(noteId){
   commit({type:'deletePostitNote', ownerId: postitOwnerId(), noteId});
@@ -2883,6 +2908,19 @@ function onPostitColumnDrop(event, colId){
     commit({type:'updatePostitNote', ownerId: postitOwnerId(), noteId: dragPostitNoteId, patch:{columnId: colId}});
   }
   dragPostitNoteId = null;
+}
+// Same ok/warn/over day-count classing renderLookAhead uses for its dueLabel
+// (see that function above) — reused as-is rather than reimplemented, so a
+// post-it's due badge means the same colors the rest of the app already does.
+function postitDueBadge(dueDate){
+  if(!dueDate) return '';
+  const days = daysBetweenStr(todayStr(), dueDate);
+  let label, cls;
+  if(days<0){ label = `${Math.abs(days)}d overdue`; cls='over'; }
+  else if(days===0){ label = 'Due today'; cls='warn'; }
+  else if(days<=7){ label = `${days}d out`; cls='warn'; }
+  else { label = `${days}d out`; cls='ok'; }
+  return `<span class="hrs-pct ${cls}" style="font-size:10.5px;">${label}</span>`;
 }
 function postitNoteHTML(n, colorIdx){
   const me = getEffectiveTeamMember();
@@ -2906,6 +2944,15 @@ function postitNoteHTML(n, colorIdx){
           ${visibleJobs().slice().sort((a,b)=>a.id.localeCompare(b.id)).map(j=>`<option value="${j.id}" ${n.jobId===j.id?'selected':''}>${j.id} — ${esc(j.name)}</option>`).join('')}
         </select>
       </div>` : ''}
+      <div style="margin-top:8px; padding-top:6px; border-top:1px dashed rgba(18,24,31,.18); display:flex; flex-direction:column; gap:3px; font-size:10.5px; opacity:.85;">
+        <label style="display:flex; align-items:center; gap:4px;">Created
+          <input type="date" value="${esc(n.date||'')}" ${disabledAttr()} style="font:inherit; font-size:10.5px; padding:1px 3px; border:1px solid rgba(18,24,31,.25); border-radius:3px; background:rgba(255,255,255,.5); color:inherit;" onchange="updatePostitNoteDate('${n.id}', this.value)">
+        </label>
+        <label style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">Due
+          <input type="date" value="${esc(n.dueDate||'')}" ${disabledAttr()} style="font:inherit; font-size:10.5px; padding:1px 3px; border:1px solid rgba(18,24,31,.25); border-radius:3px; background:rgba(255,255,255,.5); color:inherit;" onchange="updatePostitNoteDueDate('${n.id}', this.value)">
+          ${postitDueBadge(n.dueDate)}
+        </label>
+      </div>
     </div>`;
 }
 function renderPostitBoardSection(){
