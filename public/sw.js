@@ -13,8 +13,15 @@
  * Bump CACHE_VERSION whenever this file OR the shell files it lists change,
  * so returning devices pick up the update instead of running a stale shell
  * forever.
+ *
+ * Also handles push notifications (see 'push'/'notificationclick' below) —
+ * a real phone/tablet alert for a cost impact or request assigned to you,
+ * even with Nucleus closed. That's a separate job from the shell-caching
+ * above and doesn't touch it: registering for push (index.html's
+ * togglePushSubscription) reuses this same service worker rather than a
+ * second one, since a page can only ever have one active at a time.
  */
-const CACHE_VERSION = 'nucleus-shell-v1';
+const CACHE_VERSION = 'nucleus-shell-v2';
 const SHELL_URLS = [
   '/',
   '/manifest.json',
@@ -79,5 +86,46 @@ self.addEventListener('fetch', (event) => {
         if (req.mode === 'navigate') return caches.match('/');
         return Response.error();
       }))
+  );
+});
+
+// ---- Push notifications: the server (see server/webpush.js or
+// lib/webpush.js) sends one of these for every new Nucleus notification a
+// subscribed device's team member receives — a cost impact, a request
+// assigned to them. The payload is plain JSON (see notifyNewPushNotifications
+// server-side): {title, body, jobId, refId, notifType}. ----
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) { data = {}; }
+  const title = data.title || 'Nucleus';
+  const options = {
+    body: data.body || '',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: data.refId || undefined, // a second push for the same item replaces the first instead of stacking
+    data: { jobId: data.jobId || null, refId: data.refId || null, notifType: data.notifType || null }
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Tapping the notification: focus an already-open Nucleus tab and tell it
+// where to navigate (via postMessage — see index.html's
+// 'nucleus-notification-click' listener, the same navigation
+// openNotification() already does for the in-app bell), or open a new tab
+// straight to that job if none is open.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const { jobId, refId, notifType } = event.notification.data || {};
+  const targetUrl = jobId ? '/?openJob=' + encodeURIComponent(jobId) + (notifType ? '&openJobType=' + encodeURIComponent(notifType) : '') : '/';
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.postMessage({ type: 'nucleus-notification-click', jobId, refId, notifType });
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) return clients.openWindow(targetUrl);
+    })
   );
 });

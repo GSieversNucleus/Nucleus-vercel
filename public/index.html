@@ -529,6 +529,11 @@
   .attach-chip{ display:flex; align-items:center; justify-content:space-between; background:#F1EFE8; border-radius:8px; padding:7px 10px; margin-bottom:6px; font-size:12.5px; }
   .attach-chip a{ color:var(--steel-dark); text-decoration:none; font-weight:600; display:inline-flex; align-items:center; gap:6px; }
   .attach-remove{ background:none; border:none; color:var(--safety); cursor:pointer; font-size:14px; padding:0 4px; }
+  /* Tap-to-call — a Contacts phone number as a real tel: link, so tapping it
+     on a phone or tablet opens the dialer instead of just displaying digits
+     someone has to copy or retype. */
+  .tel-link{ color:var(--steel-dark); font-weight:600; text-decoration:none; }
+  .tel-link:hover{ text-decoration:underline; }
   .co-detail-section{ margin-bottom:12px; }
 
   /* ---------- Change order log (letterhead-style) ---------- */
@@ -605,6 +610,14 @@
   .attach-photo{ position:relative; width:84px; height:84px; border-radius:8px; overflow:hidden; border:1px solid var(--line); flex-shrink:0; }
   .attach-photo img{ width:100%; height:100%; object-fit:cover; cursor:pointer; display:block; }
   .attach-remove.photo{ position:absolute; top:3px; right:3px; background:rgba(18,24,31,.68); color:#fff; border-radius:50%; width:20px; height:20px; line-height:18px; text-align:center; padding:0; font-size:13px; }
+  /* Elevation progress photo timeline — each entry is a dated thumbnail
+     (oldest first, so scrolling it reads as a before/after progression)
+     with its date and an optional caption editable right underneath. */
+  .elev-photo-timeline{ display:flex; flex-wrap:wrap; gap:12px; margin-top:4px; }
+  .elev-photo-entry{ width:120px; display:flex; flex-direction:column; gap:4px; }
+  .elev-photo-entry .attach-photo{ width:120px; height:120px; }
+  .elev-photo-date-input, .elev-photo-caption-input{ font-size:11.5px; padding:4px 6px; border:1px solid var(--line); border-radius:6px; width:100%; box-sizing:border-box; font-family:var(--sans); }
+  .elev-photo-meta{ font-size:11.5px; color:var(--text-muted); }
 
   .elev-progress{ height:6px; background:var(--gray-dim); border-radius:4px; overflow:hidden; margin:10px 0 12px; }
   .elev-progress-bar{ height:100%; background:var(--good); }
@@ -2241,6 +2254,12 @@ function applyOp(op, s){
     case 'removeElevationAttachment': {
       const el = s.elevations.find(x=>x.id===op.elevId);
       if(el && el.attachments) el.attachments.splice(op.index, 1);
+      break;
+    }
+    case 'updateElevationAttachment': {
+      const el = s.elevations.find(x=>x.id===op.elevId);
+      const a = el && el.attachments && el.attachments[op.index];
+      if(a) Object.assign(a, op.patch);
       break;
     }
     case 'addElevationNote': {
@@ -4463,6 +4482,15 @@ function renderSpecs(job, specs, submittals){
 }
 
 /* ---- Contacts ---- */
+// Builds a tel: link href from however someone typed a phone number in (with
+// dashes, spaces, parens, an extension, etc.) — tel: links work fine with a
+// leading + and digits only, so everything else gets stripped rather than
+// risk a link that silently fails to dial. The number is still DISPLAYED
+// exactly as typed (see renderContacts below); this only affects the href.
+function telHref(phone){
+  const digits = String(phone||'').replace(/[^\d+]/g,'');
+  return 'tel:' + digits;
+}
 function renderContacts(contacts){
   const sections = CONTACT_CATEGORIES.map(g=>{
     const list = contacts.filter(c=>c.category===g);
@@ -4473,7 +4501,7 @@ function renderContacts(contacts){
           <div>
             <div style="font-weight:700; font-size:13.5px;">${esc(c.name)}${c.company?` <span style="color:var(--text-muted); font-weight:500;">· ${esc(c.company)}</span>`:''}</div>
             ${c.role?`<div class="issue-meta">${esc(c.role)}</div>`:''}
-            ${(c.phone||c.email)?`<div class="issue-meta">${c.phone?esc(c.phone):''}${c.phone&&c.email?' · ':''}${c.email?esc(c.email):''}</div>`:''}
+            ${(c.phone||c.email)?`<div class="issue-meta">${c.phone?`<a class="tel-link" href="${telHref(c.phone)}">${esc(c.phone)}</a>`:''}${c.phone&&c.email?' · ':''}${c.email?esc(c.email):''}</div>`:''}
           </div>
           <button class="btn sm secondary" ${disabledAttr()} onclick="deleteContact('${c.id}')">${icon('trash')}</button>
         </div>
@@ -5753,7 +5781,13 @@ function renderScheduleFieldNotes(job, scheduleFieldNotes){
     <div class="issue-meta" style="margin-bottom:8px;">Real-time notes from the field about the work plan — delays, sequencing conflicts, what's actually happening on site — separate from each task's own delay reason.</div>
     ${readOnly ? '' : `
     <div class="co-summary" style="margin-bottom:12px;">
-      <div class="field"><label>Note</label><textarea id="sched-note-text" placeholder="e.g. Level 6 curtain wall install pushed a day — waiting on lift delivery"></textarea></div>
+      <div class="field"><label>Note</label><textarea id="sched-note-text" placeholder="e.g. Level 6 curtain wall install pushed a day — waiting on lift delivery"></textarea>
+        <div style="display:flex; align-items:center; gap:10px; margin-top:8px; flex-wrap:wrap;">
+          <div class="photo-drop" style="flex:1; min-width:200px;" onclick="document.getElementById('sched-note-scan-input').click()">${icon('camera')}Scan a handwritten note</div>
+        </div>
+        <div id="sched-note-scan-status" class="issue-meta" style="margin-top:6px;"></div>
+        <input type="file" id="sched-note-scan-input" accept="image/*" capture="environment" style="display:none;" data-scan-target="sched-note-text" data-scan-status="sched-note-scan-status">
+      </div>
       <div class="field"><label>Your name</label><input id="sched-note-author" placeholder="Your name" value="${esc(currentUserName||'')}"></div>
       <button class="btn sm safety" onclick="submitScheduleFieldNote('${job.id}')">${icon('plus')} Add note</button>
     </div>`}
@@ -6006,8 +6040,17 @@ async function handleNoteScan(ev){
   const file = ev.target.files[0];
   ev.target.value = '';
   if(!file) return;
-  const statusEl = document.getElementById('note-scan-status');
-  const textEl = document.getElementById('f-text');
+  // Notes/Meeting Minutes (modal-based — only one on screen at a time) both
+  // just use the shared f-text/note-scan-status ids, so they don't need to
+  // say so explicitly. Daily Reports, Schedule Field Notes, and After Action
+  // Report entries render inline in their own tab instead of a modal, so
+  // more than one of THOSE could theoretically exist in the DOM across
+  // different tabs — each one's hidden file input says which text field and
+  // status line are its own via data-scan-target/data-scan-status (see
+  // attachInlineNoteScanListeners below), so one shared function still works
+  // for all of them without a fork of this logic.
+  const statusEl = document.getElementById(ev.target.dataset.scanStatus || 'note-scan-status');
+  const textEl = document.getElementById(ev.target.dataset.scanTarget || 'f-text');
   if(statusEl) statusEl.textContent = 'Loading text recognition…';
   try{
     await loadTesseract();
@@ -6027,6 +6070,20 @@ async function handleNoteScan(ev){
     console.error('note scan failed', e);
     if(statusEl) statusEl.textContent = "Couldn't read that photo automatically (needs an internet connection) — type the note by hand instead.";
   }
+}
+// Daily Reports (Field Tool Kit), Schedule Field Notes (Schedule tab), and
+// After Action Report entries all render their "Scan a handwritten note"
+// file input inline as part of the normal tab markup, not inside a modal —
+// so, unlike Notes/Meeting Minutes (wired up once, from openModal/
+// openMeetingMinutesDetail, when their overlay is created), these need their
+// change listener re-attached every time render() replaces the tab's
+// innerHTML. Harmless no-ops on any render where a given tab isn't showing —
+// getElementById just returns null and each line is skipped.
+function attachInlineNoteScanListeners(){
+  ['dr-note-scan-input','sched-note-scan-input','aar-note-scan-input'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.addEventListener('change', handleNoteScan);
+  });
 }
 
 /* ===================== MEETING MINUTES (Feature H) =====================
@@ -6794,14 +6851,20 @@ function elevationDetailHTML(el){
       <div class="field"><label>Equipment planned</label><input id="elev-detail-equipment" value="${esc(el.plannedEquipment||'')}" ${disabledAttr()} onchange="updateElevationField('${el.id}','plannedEquipment',this.value.trim())" placeholder="e.g. 2 boom lifts, forklift"></div>
     </div>
     <div class="field"><label>Notes</label><textarea id="elev-detail-notes" ${disabledAttr()} onchange="updateElevationField('${el.id}','notes',this.value.trim())" placeholder="Anything else worth tracking">${esc(el.notes||'')}</textarea></div>
-    <div class="field"><label>Documents &amp; photos</label>
+    <div class="field"><label>Progress photos</label>
+      <div class="issue-meta" style="margin-bottom:6px;">A dated before/after timeline for this elevation — each photo gets a date (defaults to today) and an optional caption, oldest first.</div>
+      <div id="elev-photo-timeline">${renderElevPhotoTimelineHTML(el.attachments)}</div>
+      ${readOnly ? '' : `
+      <div class="field-row" style="margin-top:8px;">
+        <div class="field"><label>Date for the next photo(s)</label><input type="date" id="elev-photo-date" value="${todayStr()}"></div>
+      </div>
+      <div class="photo-drop" onclick="document.getElementById('elev-detail-photo-input').click()">${icon('camera')}Add progress photo(s)</div>
+      <input type="file" id="elev-detail-photo-input" accept="image/*" multiple capture="environment" style="display:none;">`}
+    </div>
+    <div class="field"><label>Documents</label>
       <div id="elev-detail-attach-list">${renderElevAttachGridHTML(el.attachments)}</div>
       ${readOnly ? '' : `
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-        <div class="photo-drop" style="flex:1; min-width:150px;" onclick="document.getElementById('elev-detail-photo-input').click()">${icon('camera')}Add photos</div>
-        <div class="photo-drop" style="flex:1; min-width:150px;" onclick="document.getElementById('elev-detail-file-input').click()">${icon('fileUpload')}Add a document</div>
-      </div>
-      <input type="file" id="elev-detail-photo-input" accept="image/*" multiple capture="environment" style="display:none;">
+      <div class="photo-drop" style="margin-top:8px;" onclick="document.getElementById('elev-detail-file-input').click()">${icon('fileUpload')}Add a document</div>
       <input type="file" id="elev-detail-file-input" multiple style="display:none;">`}
     </div>
     <div class="section-title" style="margin-top:18px;">Field notes — foreman insights</div>
@@ -6819,15 +6882,45 @@ function elevationDetailHTML(el){
     <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Close</button></div>
   </div>`;
 }
+// Documents only now — progress photos (anything isImageAttachment) get
+// their own dated timeline instead (see renderElevPhotoTimelineHTML below).
+// idx here is always the item's real position in el.attachments (not a
+// position within this filtered view), since that's what
+// removeElevationAttachment/updateElevationAttachment splice/index into.
 function renderElevAttachGridHTML(list){
-  if(!list || list.length===0) return `<div class="issue-meta">No documents or photos attached yet.</div>`;
-  return `<div class="attach-grid">${list.map((a,i)=>{
-    if(isImageAttachment(a)){
-      return `<div class="attach-photo"><img src="${a.dataUrl}" onclick="showLightbox('${a.dataUrl.replace(/'/g,"\\'")}')">${readOnly?'':`<button type="button" class="attach-remove photo" onclick="removeElevationAttachment(event, ${i})" aria-label="Remove photo">&times;</button>`}</div>`;
-    }
-    return `<div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
-      ${readOnly?'':`<button type="button" class="attach-remove" onclick="removeElevationAttachment(event, ${i})" aria-label="Remove attachment">&times;</button>`}</div>`;
-  }).join('')}</div>`;
+  const docs = (list||[]).map((a,i)=>({a,i})).filter(({a})=>!isImageAttachment(a));
+  if(docs.length===0) return `<div class="issue-meta">No documents attached yet.</div>`;
+  return `<div class="attach-grid">${docs.map(({a,i})=>`
+    <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+      ${readOnly?'':`<button type="button" class="attach-remove" onclick="removeElevationAttachment(event, ${i})" aria-label="Remove attachment">&times;</button>`}</div>`).join('')}</div>`;
+}
+// A dated before/after timeline for this elevation's progress photos —
+// Greg's ask beyond the checklist-driven progress % and plain photo
+// attachments that already existed: sorted oldest-first so scrolling it
+// reads as a real progression, not just a pile of photos. Photos from
+// before this feature existed simply have no `date` yet (sort to the
+// front, oldest-unknown) and no `caption` — both are editable right here,
+// not just at upload time, since the date a photo is UPLOADED and the date
+// it was actually TAKEN often aren't the same day on a job site.
+function renderElevPhotoTimelineHTML(list){
+  const photos = (list||[]).map((a,i)=>({a,i})).filter(({a})=>isImageAttachment(a));
+  if(photos.length===0) return `<div class="issue-meta">No progress photos yet — add one below to start a before/after timeline.</div>`;
+  const sorted = photos.slice().sort((x,y)=>(x.a.date||'').localeCompare(y.a.date||''));
+  return `<div class="elev-photo-timeline">${sorted.map(({a,i})=>`
+    <div class="elev-photo-entry">
+      <div class="attach-photo"><img src="${a.dataUrl}" onclick="showLightbox('${a.dataUrl.replace(/'/g,"\\'")}')">${readOnly?'':`<button type="button" class="attach-remove photo" onclick="removeElevationAttachment(event, ${i})" aria-label="Remove photo">&times;</button>`}</div>
+      ${readOnly
+        ? `<div class="elev-photo-meta">${a.date?esc(a.date):'No date'}${a.caption?' — '+esc(a.caption):''}</div>`
+        : `<input type="date" class="elev-photo-date-input" value="${a.date||''}" onchange="updateElevationAttachmentField(${i},'date',this.value)">
+           <input type="text" class="elev-photo-caption-input" placeholder="Caption (optional)" value="${esc(a.caption||'')}" onchange="updateElevationAttachmentField(${i},'caption',this.value.trim())">`}
+    </div>`).join('')}</div>`;
+}
+function updateElevationAttachmentField(idx, field, value){
+  const overlay = document.querySelector('.modal-overlay');
+  const elevId = overlay ? overlay.dataset.elevId : null;
+  if(!elevId) return;
+  commit({type:'updateElevationAttachment', elevId, index: idx, patch:{[field]: value}});
+  refreshElevationDetail(elevId);
 }
 function refreshElevationDetail(elevId){
   const el = state.elevations.find(x=>x.id===elevId);
@@ -6840,6 +6933,8 @@ function updateElevationField(elevId, field, value){
 }
 async function handleElevationPhotoSelect(e, elevId){
   const files = Array.from(e.target.files);
+  const dateEl = document.getElementById('elev-photo-date');
+  const photoDate = (dateEl && dateEl.value) || todayStr();
   const newAttachments = [];
   for(const file of files){
     if(!file.type.startsWith('image/')) continue;
@@ -6848,7 +6943,11 @@ async function handleElevationPhotoSelect(e, elevId){
       alert('A photo would push this job\'s stored data over the limit. Try fewer or smaller photos.');
       continue;
     }
-    newAttachments.push({name:file.name, dataUrl, size:dataUrl.length});
+    // date/caption make this a timeline entry, not just a flat attachment —
+    // see renderElevPhotoTimelineHTML. The whole batch shares whatever date
+    // was picked above (one shoot, one date) — each can still be corrected
+    // individually afterward, and a caption added, right in the timeline.
+    newAttachments.push({name:file.name, dataUrl, size:dataUrl.length, date: photoDate, caption: ''});
   }
   e.target.value = '';
   if(newAttachments.length){
@@ -7165,7 +7264,13 @@ function renderFieldToolKit(job, isForeman){
         <div class="field"><label>Weather (optional)</label><input id="dr-weather" placeholder="e.g. Clear, 68°F"></div>
         <div class="field"><label>Manpower on-site (optional)</label><input type="number" min="0" id="dr-manpower" placeholder="0"></div>
       </div>
-      <div class="field"><label>Work performed / notes</label><textarea id="dr-notes" placeholder="Type today's report — or leave this blank and just attach a photo or PDF of a paper daily report after saving"></textarea></div>
+      <div class="field"><label>Work performed / notes</label><textarea id="dr-notes" placeholder="Type today's report — or leave this blank and just attach a photo or PDF of a paper daily report after saving"></textarea>
+        <div style="display:flex; align-items:center; gap:10px; margin-top:8px; flex-wrap:wrap;">
+          <div class="photo-drop" style="flex:1; min-width:200px;" onclick="document.getElementById('dr-note-scan-input').click()">${icon('camera')}Scan a handwritten note</div>
+        </div>
+        <div id="dr-note-scan-status" class="issue-meta" style="margin-top:6px;"></div>
+        <input type="file" id="dr-note-scan-input" accept="image/*" capture="environment" style="display:none;" data-scan-target="dr-notes" data-scan-status="dr-note-scan-status">
+      </div>
       <button class="btn sm safety" onclick="submitDailyReport('${job.id}')">${icon('plus')} Add daily report</button>
     </div>`}
     ${dailyReports.length===0 ? emptyBlock('clipboardList','No daily reports logged yet — type one, attach a photo of a paper report, or both.') : drRows}
@@ -7449,7 +7554,13 @@ function renderAAR(job, aarEntries){
       <div class="field"><label>Linked elevation (optional)</label>
         <select id="aar-elevation"><option value="">None</option>${elevations.map(el=>`<option value="${el.id}">${esc(el.name||el.id)}</option>`).join('')}</select>
       </div>
-      <div class="field"><label>Note</label><textarea id="aar-text" placeholder="What happened, what caused it, what would make it better next time"></textarea></div>
+      <div class="field"><label>Note</label><textarea id="aar-text" placeholder="What happened, what caused it, what would make it better next time"></textarea>
+        <div style="display:flex; align-items:center; gap:10px; margin-top:8px; flex-wrap:wrap;">
+          <div class="photo-drop" style="flex:1; min-width:200px;" onclick="document.getElementById('aar-note-scan-input').click()">${icon('camera')}Scan a handwritten note</div>
+        </div>
+        <div id="aar-note-scan-status" class="issue-meta" style="margin-top:6px;"></div>
+        <input type="file" id="aar-note-scan-input" accept="image/*" capture="environment" style="display:none;" data-scan-target="aar-text" data-scan-status="aar-note-scan-status">
+      </div>
       <div class="field"><label>Your name</label><input id="aar-author" placeholder="Your name" value="${esc(currentUserName||'')}"></div>
       <button class="btn sm safety" onclick="submitAAR('${job.id}')">${icon('plus')} Add entry</button>
     </div>`}
@@ -9308,6 +9419,7 @@ function render(){
   updateViewAsControl();
   updateNotificationsControl();
   updateSearchScopeControl();
+  attachInlineNoteScanListeners();
 }
 
 async function boot(){
@@ -9364,6 +9476,8 @@ async function boot(){
   if('serviceWorker' in navigator){
     navigator.serviceWorker.register('/sw.js').catch(e => console.warn('service worker registration failed', e));
   }
+  handleOpenJobFromUrl();
+  initPushSupport();
 }
 
 /* Flush any unsaved edit immediately when the tab is closed, backgrounded, or
@@ -10282,6 +10396,7 @@ function renderNotificationsDropdownContent(){
       <div style="font-weight:800; font-size:13.5px;">Notifications</div>
       ${items.some(n=>!n.read) ? `<button class="btn sm secondary" onclick="markAllNotificationsRead()">Mark all read</button>` : ''}
     </div>
+    ${pushSupported ? `<button class="btn sm secondary" style="width:100%; margin-bottom:8px;" id="push-toggle-btn" onclick="togglePushSubscription()">${pushSubscribed ? 'Turn off phone alerts for this device' : 'Get phone alerts on this device'}</button>` : ''}
     ${items.length===0 ? `<div class="issue-meta" style="padding:8px 2px;">Nothing yet.</div>` : rows}`;
 }
 function openNotification(notifId){
@@ -10297,6 +10412,112 @@ function markAllNotificationsRead(){
   const me = getCurrentTeamMember();
   if(!me) return;
   commit({type:'markAllNotificationsRead', recipientMemberId: me.id});
+}
+
+/* ===================== PUSH NOTIFICATIONS (client) =====================
+   A real phone/tablet alert for a new notification (see NOTIFICATIONS/
+   Feature O above) even with Nucleus closed — no paid SMS/email service,
+   just the browser's own Push API talking to this server (see
+   server/webpush.js — or lib/webpush.js on the Vercel build — for how the
+   send itself works) via a service worker (sw.js's 'push'/'notificationclick'
+   handlers). Per-device, not per-person: each device someone signs into
+   subscribes (or not) on its own, same as a phone's own notification
+   settings — turning it on/off on one tablet has no effect on their laptop.
+   pushApiFetch falls back to plain fetch() when authFetch doesn't exist —
+   harmless in a context with no real backend for these endpoints (they'll
+   just 404 and pushSupported stays false), which is exactly what keeps this
+   code safe to be identical everywhere Nucleus runs, including anywhere
+   without a matching server. */
+let pushSupported = false; // true only once a real backend confirms it has a VAPID key configured
+let pushSubscribed = false;
+let pushVapidPublicKey = null;
+function pushApiFetch(url, opts){
+  return (typeof authFetch === 'function') ? authFetch(url, opts) : fetch(url, opts);
+}
+function urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+async function initPushSupport(){
+  pushSupported = false;
+  pushSubscribed = false;
+  if(!('serviceWorker' in navigator) || !('PushManager' in window) || typeof Notification === 'undefined'){
+    updateNotificationsControl();
+    return;
+  }
+  try{
+    const res = await pushApiFetch('/api/push/vapid-public-key', {cache:'no-store'});
+    if(!res.ok) { updateNotificationsControl(); return; }
+    const data = await res.json();
+    if(!data || !data.publicKey){ updateNotificationsControl(); return; }
+    pushVapidPublicKey = data.publicKey;
+    pushSupported = true;
+    const reg = await navigator.serviceWorker.register('/sw.js').catch(()=>null);
+    if(reg){
+      const existing = await reg.pushManager.getSubscription().catch(()=>null);
+      pushSubscribed = !!existing;
+    }
+  }catch(e){ pushSupported = false; }
+  updateNotificationsControl();
+}
+async function togglePushSubscription(){
+  const btn = document.getElementById('push-toggle-btn');
+  if(btn) btn.disabled = true;
+  try{
+    const reg = await navigator.serviceWorker.getRegistration('/sw.js') || await navigator.serviceWorker.register('/sw.js');
+    if(pushSubscribed){
+      const sub = await reg.pushManager.getSubscription();
+      if(sub){
+        try{ await pushApiFetch('/api/push/unsubscribe', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({endpoint: sub.endpoint})}); }catch(e){}
+        await sub.unsubscribe();
+      }
+      pushSubscribed = false;
+    } else {
+      const permission = await Notification.requestPermission();
+      if(permission !== 'granted'){
+        alert('Notifications are blocked for this site — allow them in your browser or device settings, then try again.');
+      } else {
+        const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(pushVapidPublicKey) });
+        await pushApiFetch('/api/push/subscribe', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({subscription: sub.toJSON(), userAgent: navigator.userAgent})});
+        pushSubscribed = true;
+      }
+    }
+  }catch(e){
+    alert("Couldn't update push notifications for this device — try again in a moment.");
+  }
+  if(btn) btn.disabled = false;
+  updateNotificationsControl();
+}
+// Tapping a push notification (see sw.js's 'notificationclick') focuses this
+// tab if it's already open and posts here what to navigate to — the exact
+// same navigation openNotification() already does for the in-app bell.
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const msg = event.data;
+    if(!msg || msg.type !== 'nucleus-notification-click' || !msg.jobId) return;
+    const tab = msg.notifType==='costImpact' ? 'costs' : 'requests';
+    if(tab==='costs') ui.costSubTab = 'impacts';
+    openJob(msg.jobId, tab);
+  });
+}
+// Falls back to a plain URL when the service worker had to open a brand-new
+// tab instead of focusing an existing one (see sw.js) — same navigation,
+// just triggered from the query string this loads with instead of postMessage.
+function handleOpenJobFromUrl(){
+  try{
+    const params = new URLSearchParams(location.search);
+    const jobId = params.get('openJob');
+    if(!jobId) return;
+    const notifType = params.get('openJobType');
+    const tab = notifType==='costImpact' ? 'costs' : 'requests';
+    if(tab==='costs') ui.costSubTab = 'impacts';
+    openJob(jobId, tab);
+    history.replaceState(null, '', location.pathname);
+  }catch(e){}
 }
 
 </script>
