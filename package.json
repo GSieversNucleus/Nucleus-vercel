@@ -1,0 +1,12 @@
+{
+  "name": "nucleus-vercel",
+  "version": "1.0.0",
+  "description": "Nucleus Central Command Center — installable PWA deployed on Vercel, with data stored in Upstash Redis.",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.34.0"
+  }
+}
