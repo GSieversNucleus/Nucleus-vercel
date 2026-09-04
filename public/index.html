@@ -198,8 +198,12 @@
      REAL signed-in identity is App Manager (see updateViewAsControl) — this
      is look-only, never a real account switch, and never affects what gets
      saved (see getEffectiveTeamMember vs getCurrentTeamMember). */
-  .viewas-wrap{ display:inline-block; }
+  .viewas-wrap{ display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .viewas-select{ border-color:var(--proc); background:#20242c; }
+  /* Bug fix support: inline message shown instead of the member picker when
+     a Foreman/Project-Manager preview has no specific person chosen yet, or
+     none of that role exists — see updateViewAsControl/renderHome. */
+  .viewas-msg{ color:#F0B429; font-size:11.5px; font-weight:700; max-width:240px; line-height:1.3; }
   .preview-banner{
     position:sticky; top:0; z-index:80; background:var(--safety); color:#fff;
     padding:9px 16px; display:flex; align-items:center; justify-content:center;
@@ -686,6 +690,18 @@
         <option value="Foreman">View as: Foreman</option>
         <option value="none">View as: No role selected</option>
       </select>
+      <!-- Bug fix: Foreman and Project Manager visibility is ID-based
+           (job.assignedForemen/assignedPMs), so previewing just the role
+           always showed zero jobs (the preview clone kept the App Manager's
+           own id, which never appears in anyone's assignment list) — see
+           getEffectiveTeamMember. This second select lets the App Manager
+           pick a SPECIFIC real person of that role to preview as; it's only
+           shown for those two roles (see updateViewAsControl), which also
+           populates it and shows viewas-msg instead when nobody's picked. -->
+      <select id="viewas-member-select" class="identity-select viewas-select" onchange="setPreviewMemberId(this.value)" title="Foreman and Project Manager job visibility is tied to a specific person's real assignments, not just the role — pick a real person of this role to preview their actual assigned jobs." hidden>
+        <option value="">Pick a person…</option>
+      </select>
+      <span class="viewas-msg" id="viewas-msg" hidden></span>
     </div>
     <button class="home-btn" id="change-password-btn" onclick="openChangePasswordModal()" title="Change your Nucleus password" style="display:none;"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><path d="M12 15v2.5"/></svg> Change password</button>
     <button class="home-btn" onclick="signOut()" title="Sign out of Nucleus on this device"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Sign out</button>
@@ -762,6 +778,12 @@ let state = defaultState();
 // never saved, never sent anywhere, always starts unset on a fresh load. See
 // getEffectiveTeamMember/setPreviewRole/exitPreview near Team & identity below.
 let ui = { view: 'home', jobId: null, tab: 'overview', costSubTab: 'impacts', coView: 'cards', specsView: 'cards', scheduleMonth: currentMonthStr(), homeMonth: currentMonthStr(), overviewCalMonth: currentMonthStr(), overviewCalMode: 'field', searchScope: 'all', engFilterJobId: '', schedFilterJobId: '', mpHoursPerDay: 8, opsCalJobId: '', opsCalMonth: currentMonthStr(), opsCalMode: 'field', superSchedMonth: currentMonthStr(), jobLogAuthor: '', jobLogBucket: '', previewRole: null,
+  // Bug fix (View As): Foreman/Project Manager preview needs a SPECIFIC real
+  // person picked, since their visibility is id-based — see
+  // getEffectiveTeamMember/setPreviewMemberId. Reset alongside previewRole
+  // any time the role changes or preview exits (setPreviewRole/exitPreview/
+  // setCurrentTeamMember) so a stale pick never carries into a new preview.
+  previewMemberId: null,
   // Superintendent's consolidated home calendar (scope + type toggle, shares
   // renderRoleCalendarSection with Operations' calendar above) — month reuses
   // superSchedMonth above rather than a redundant key. jobId '' means "all jobs".
@@ -785,17 +807,32 @@ let ui = { view: 'home', jobId: null, tab: 'overview', costSubTab: 'impacts', co
   // Feature P: PM's cross-job Notes overview (home screen) — search text and
   // group/sort mode, mirroring the Log & Notes page's own filter pattern.
   pmNotesSearch: '', pmNotesSort: 'date' };
-// Nucleus is a single-user PM tool — every job is always visible, and there's no
-// per-role permission tier to gate anything on. These stubs stay so the rest of the
-// app (home screen, search, look-ahead, calendar) doesn't need to special-case that.
+// A Project Manager's home screen only shows jobs they're assigned to
+// (job.assignedPMs — a job can have more than one PM, mirroring Foremen),
+// and a Foreman's only shows jobs they're assigned to (job.assignedForemen —
+// a job can have more than one Foreman). Every other role, and no identity
+// selected at all, sees every job — unless a per-person job-visibility
+// override says otherwise (see "Per-person job-visibility overrides" near
+// canManageTabOverrides below). roleDefaultJobVisible holds the pure
+// role-based rule with no override applied — kept as its own function, same
+// reason roleDefaultTabAllowed is: so the job-visibility settings panel can
+// show "what would this person see with no override" next to what they
+// actually see now. isJobVisible layers the per-person override on top,
+// mirroring roleDefaultTabAllowed/tabAllowedForCurrentUser exactly.
+function roleDefaultJobVisible(jobId, member){
+  const job = getJob(jobId);
+  if(!job) return false;
+  if(member.role==='Project Manager') return (job.assignedPMs||[]).includes(member.id);
+  if(member.role==='Foreman') return (job.assignedForemen||[]).includes(member.id);
+  return true;
+}
 function isJobVisible(jobId){
   const me = getEffectiveTeamMember();
   if(!me) return true;
-  const job = getJob(jobId);
-  if(!job) return false;
-  if(me.role==='Project Manager') return (job.assignedPMs||[]).includes(me.id);
-  if(me.role==='Foreman') return (job.assignedForemen||[]).includes(me.id);
-  return true;
+  const roleDefault = roleDefaultJobVisible(jobId, me);
+  if(me.__isPreview) return roleDefault; // never apply personal overrides to a preview clone — same guard as tabAllowedForCurrentUser
+  if(me.jobOverrides && Object.prototype.hasOwnProperty.call(me.jobOverrides, jobId)) return !!me.jobOverrides[jobId];
+  return roleDefault;
 }
 function visibleJobs(){ return state.jobs.filter(j=>isJobVisible(j.id)); }
 
@@ -859,6 +896,7 @@ function setCurrentTeamMember(id){
   // it (see getEffectiveTeamMember), and it must never survive an identity
   // change and silently apply to someone else.
   ui.previewRole = null;
+  ui.previewMemberId = null;
   if(ui.view==='job' && ui.jobId && !isJobVisible(ui.jobId)) goHome();
   else render();
 }
@@ -886,6 +924,39 @@ function getEffectiveTeamMember(){
   const real = getCurrentTeamMember();
   if(real && real.role==='App Manager' && ui.previewRole){
     if(ui.previewRole==='none') return null; // previewing "no role selected"
+    // Bug fix: Foreman and Project Manager visibility is ID-based
+    // (job.assignedForemen/assignedPMs — see roleDefaultJobVisible), not
+    // role-based. A role-only preview clone always kept the App Manager's
+    // OWN id, and no job's assignedForemen/assignedPMs will ever contain
+    // that id, so previewing either of these two roles ALWAYS showed zero
+    // jobs regardless of real data — this is exactly what confused Greg
+    // ("View as -> Foreman" showed nothing even though Rye Vierra, a real
+    // Foreman, is genuinely assigned to three jobs). Fix: for these two
+    // roles, require picking a SPECIFIC real team member of that role
+    // (ui.previewMemberId, set via the second "View as" select — see
+    // updateViewAsControl/setPreviewMemberId) and clone THEIR real id, so
+    // the id-based check resolves against real assignment data — while
+    // still forcing role to the previewed role, dropping tabOverrides, and
+    // marking __isPreview, exactly like the plain role-preview clone below.
+    // This stays a "role default" look, not a full impersonation of that
+    // person's own tabOverrides/jobOverrides — deliberate, unchanged design,
+    // see "Per-person tab overrides" and "Per-person job-visibility
+    // overrides" for why previews never pick up anyone's personal overrides.
+    if(ui.previewRole==='Foreman' || ui.previewRole==='Project Manager'){
+      const picked = ui.previewMemberId ? state.team.find(m=>m.id===ui.previewMemberId && m.role===ui.previewRole) : null;
+      if(!picked){
+        // No specific person chosen yet (or none exist with this role): an
+        // unresolved preview. id stays null on purpose — every id-based
+        // visibility check then correctly resolves to "sees nothing"
+        // instead of silently matching the App Manager's own id, and
+        // __previewUnresolved lets renderHome show an explicit "pick
+        // someone" message for this state instead of a silent empty jobs
+        // list (see renderHome's jobs.length===0 branch) — that silent-empty
+        // behavior is exactly what confused Greg in the first place.
+        return { id: null, role: ui.previewRole, tabOverrides: null, jobOverrides: null, __isPreview: true, __previewUnresolved: true };
+      }
+      return Object.assign({}, picked, { role: ui.previewRole, tabOverrides: null, __isPreview: true });
+    }
     // Role-preview clone: a role swap only, not a specific real person — so it
     // deliberately drops tabOverrides (the real App Manager's own personal
     // per-tab overrides must never leak into a preview of another role) and
@@ -899,11 +970,23 @@ function setPreviewRole(role){
   const real = getCurrentTeamMember();
   if(!real || real.role!=='App Manager') return; // only ever settable by the real App Manager
   ui.previewRole = role || null;
+  ui.previewMemberId = null; // a fresh role pick always clears any previously chosen specific person
+  if(ui.view==='job' && ui.jobId && !isJobVisible(ui.jobId)) goHome();
+  else render();
+}
+// Bug fix: the specific-person picker for a Foreman/Project-Manager preview
+// (see getEffectiveTeamMember above). Only meaningful while previewing one
+// of those two roles; setPreviewRole always resets this to null first.
+function setPreviewMemberId(id){
+  const real = getCurrentTeamMember();
+  if(!real || real.role!=='App Manager') return;
+  ui.previewMemberId = id || null;
   if(ui.view==='job' && ui.jobId && !isJobVisible(ui.jobId)) goHome();
   else render();
 }
 function exitPreview(){
   ui.previewRole = null;
+  ui.previewMemberId = null;
   render();
 }
 function updateViewAsControl(){
@@ -911,9 +994,31 @@ function updateViewAsControl(){
   const isAppManager = !!(real && real.role==='App Manager');
   const wrap = document.getElementById('viewas-wrap');
   if(wrap) wrap.hidden = !isAppManager;
-  if(!isAppManager && ui.previewRole) ui.previewRole = null;
+  if(!isAppManager && ui.previewRole){ ui.previewRole = null; ui.previewMemberId = null; }
   const sel = document.getElementById('viewas-select');
   if(sel) sel.value = ui.previewRole || '';
+  // Bug fix: Foreman/Project Manager previews need a specific real person
+  // picked (see getEffectiveTeamMember) — show/populate the second select
+  // only for those two roles, and show an explicit inline message instead
+  // of silence when nobody's on the team with that role yet, or nobody's
+  // been picked (renderHome's empty-jobs branch shows the same message).
+  const memberSel = document.getElementById('viewas-member-select');
+  const msg = document.getElementById('viewas-msg');
+  const needsMember = isAppManager && (ui.previewRole==='Foreman' || ui.previewRole==='Project Manager');
+  if(memberSel){
+    memberSel.hidden = !needsMember;
+    if(needsMember){
+      const candidates = state.team.filter(m=>m.role===ui.previewRole).sort((a,b)=>a.name.localeCompare(b.name));
+      memberSel.innerHTML = `<option value="">Pick a ${esc(ui.previewRole)}…</option>` + candidates.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('');
+      memberSel.value = (ui.previewMemberId && candidates.some(m=>m.id===ui.previewMemberId)) ? ui.previewMemberId : '';
+      const plural = ui.previewRole==='Foreman' ? 'Foremen' : 'Project Managers';
+      if(msg){
+        if(!candidates.length){ msg.hidden = false; msg.textContent = `No ${plural} on the team yet to preview.`; }
+        else if(!ui.previewMemberId){ msg.hidden = false; msg.textContent = `Pick a ${ui.previewRole} to preview their job visibility.`; }
+        else msg.hidden = true;
+      }
+    } else if(msg) msg.hidden = true;
+  }
   const banner = document.getElementById('preview-banner');
   const bannerText = document.getElementById('preview-banner-text');
   const previewing = isAppManager && !!ui.previewRole;
@@ -1177,6 +1282,34 @@ function firstAllowedTab(){
 // empty-roster bootstrap exception) right next to it in the roster row — not
 // a loosening of that gate, a distinct, broader one for a distinct ability.
 function canManageTabOverrides(){
+  return !!(verifiedIdentity && verifiedIdentity.matched && (verifiedIdentity.role==='App Manager' || verifiedIdentity.role==='Operations Manager'));
+}
+
+/* ---- Per-person job-visibility overrides (App Manager / Operations
+   Manager only) ----
+   Greg wants App Manager and Operations Manager to be able to set "what job
+   each individual can review" — particularly useful for roles like
+   Operations Manager, Superintendent, and Engineering Manager, which
+   currently see every job with no filtering at all (unlike Project Manager/
+   Foreman, whose visibility is already scoped by job.assignedPMs/
+   assignedForemen — see roleDefaultJobVisible up near isJobVisible). Each
+   team member can carry a `jobOverrides` map, e.g. {"J-002":false,
+   "J-005":true} — a key PRESENT forces that job's visibility ON or OFF for
+   that specific person regardless of their role's default; a key ABSENT
+   means "use the role default," the same true two-way override (can grant a
+   job the role wouldn't normally see, or hide one it would) tied to a
+   specific person's team-member id, and the same Reset-vs-flip distinction,
+   as the tabOverrides feature directly above — structured to mirror it
+   exactly. See openJobOverridesPanel/jobOverridesPanelHTML for who can set
+   it and how.
+   Same View-As interaction as tabOverrides: a preview clone from
+   getEffectiveTeamMember() — whether the plain role-swap clone or the
+   specific-real-person Foreman/Project-Manager clone (see
+   getEffectiveTeamMember above) — is always marked __isPreview and never
+   picks up anyone's personal jobOverrides; isJobVisible branches on
+   __isPreview so a preview always resolves to a pure role-default view,
+   exactly like tabAllowedForCurrentUser does for tabs. */
+function canManageJobOverrides(){
   return !!(verifiedIdentity && verifiedIdentity.matched && (verifiedIdentity.role==='App Manager' || verifiedIdentity.role==='Operations Manager'));
 }
 
@@ -1759,6 +1892,10 @@ function applyOp(op, s){
     case 'deleteJob':
       s.jobs = s.jobs.filter(j=>j.id!==op.jobId);
       ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','elevations','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'].forEach(k=>{ s[k] = s[k].filter(x=>x.jobId!==op.jobId); });
+      // Per-person job-visibility overrides (see "Per-person job-visibility
+      // overrides" near canManageTabOverrides) shouldn't accumulate stale
+      // references to a job that no longer exists.
+      s.team.forEach(m=>{ if(m.jobOverrides && Object.prototype.hasOwnProperty.call(m.jobOverrides, op.jobId)) delete m.jobOverrides[op.jobId]; });
       break;
     case 'updateJobBudget': {
       const j = s.jobs.find(x=>x.id===op.jobId);
@@ -2438,6 +2575,26 @@ function renderHome(){
     // Assigning themselves as PM in the create-job form is what makes the
     // new job show up here afterward.
     const meHere = getEffectiveTeamMember();
+    // Bug fix: a View-As Foreman/Project-Manager preview with no specific
+    // real person picked (or nobody on the team with that role yet) used to
+    // fall straight into the generic "no jobs assigned" message below, which
+    // reads exactly like a real person genuinely having zero jobs — that's
+    // what confused Greg when "View as -> Foreman" showed no jobs even
+    // though Rye Vierra, a real Foreman, is assigned to three. Surface the
+    // unresolved-preview state explicitly instead of a silently-empty list.
+    if(meHere && meHere.__previewUnresolved){
+      const roleWord = meHere.role;
+      const plural = roleWord==='Foreman' ? 'Foremen' : 'Project Managers';
+      const hasAny = state.team.some(m=>m.role===roleWord);
+      const msg = hasAny
+        ? `Pick a ${roleWord} to preview their job visibility.`
+        : `No ${plural} on the team yet to preview.`;
+      app.innerHTML = `
+        ${banner}
+        <div class="home-head"><div><h2>Your jobs</h2><p>Previewing as: ${esc(roleWord)}</p></div></div>
+        <div class="empty">${icon('helpCircle')}${esc(msg)} Use the "Pick a person…" picker next to the "View as" select in the top bar.</div>`;
+      return;
+    }
     const isPM = !!(meHere && meHere.role==='Project Manager');
     app.innerHTML = `
       ${banner}
@@ -2479,6 +2636,7 @@ function renderHome(){
     <div class="job-grid">${cards}</div>
     ${renderEngineeringManagerOverviewSection()}
     ${renderLookAhead()}
+    ${renderOpsContractCostOverview()}
     ${renderOpsCalendarSection()}
     ${renderPMCalendarSection()}
     ${renderPMNotesOverviewSection()}
@@ -3177,6 +3335,11 @@ function renderTeamSection(){
   // panel (see canManageTabOverrides/openTabOverridesPanel). Does not loosen
   // canManageTeam/canManageLogins in any way.
   const canManageOverrides = canManageTabOverrides();
+  // Same wider App-Manager-OR-Operations-Manager check as canManageOverrides
+  // above, for the new per-person job-visibility settings panel (see
+  // canManageJobOverrides/openJobOverridesPanel). Does not loosen
+  // canManageTeam/canManageLogins in any way.
+  const canManageJobAccess = canManageJobOverrides();
   const memberRow = (m)=>{
     if(ui.editingTeamMemberId === m.id){
       return `
@@ -3200,6 +3363,7 @@ function renderTeamSection(){
         <span style="display:flex; gap:6px;">
           ${(m.email && !ssoMode && canManageLogins) ? `<button class="btn sm secondary" ${disabledAttr()} onclick="openSetPasswordModal('${m.id}')" title="Set or reset this person's login password">${icon('lock')||''} Set login</button>` : ''}
           ${canManageOverrides ? `<button class="btn sm secondary" ${disabledAttr()} onclick="openTabOverridesPanel('${m.id}')" title="Section visibility — turn tabs on/off just for this person">${icon('sliders')}</button>` : ''}
+          ${canManageJobAccess ? `<button class="btn sm secondary" ${disabledAttr()} onclick="openJobOverridesPanel('${m.id}')" title="Job access — control which jobs this person can review">${icon('buildingSkyscraper')}</button>` : ''}
           ${canManageTeam ? `<button class="btn sm secondary" ${disabledAttr()} onclick="startEditTeamMember('${m.id}')" title="Edit">${icon('edit')}</button>` : ''}
           ${canManageTeam ? `<button class="btn sm secondary" ${disabledAttr()} onclick="deleteTeamMember('${m.id}')">${icon('trash')}</button>` : ''}
         </span>
@@ -3314,6 +3478,79 @@ function clearTabOverride(memberId, tabKey){
   refreshTabOverridesPanel(memberId);
 }
 
+/* ---- Per-person job visibility settings panel — App Manager / Operations
+   Manager only (see canManageJobOverrides above), reached from the job icon
+   on a roster row, right next to the tab-visibility sliders icon. Lists
+   every job in state.jobs with a checkbox reflecting that person's CURRENT
+   effective visibility (their explicit override if one's set, otherwise
+   roleDefaultJobVisible), a "(custom)" vs "(role default: visible/hidden)"
+   indicator, and a "Reset" button that clears an override back to the role
+   default entirely — same conventions as tabOverridesPanelHTML above,
+   mirrored exactly, same bespoke modal-overlay pattern. */
+function openJobOverridesPanel(memberId){
+  if(!canManageJobOverrides()) return;
+  const m = state.team.find(x=>x.id===memberId);
+  if(!m) return;
+  closeModal();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.dataset.jobOverridesMemberId = memberId;
+  overlay.onclick = (e)=>{ if(e.target===overlay) closeModal(); };
+  overlay.innerHTML = jobOverridesPanelHTML(m);
+  document.body.appendChild(overlay);
+}
+function jobOverridesPanelHTML(m){
+  const overrides = m.jobOverrides || {};
+  const jobs = state.jobs.slice().sort((a,b)=>a.id.localeCompare(b.id));
+  const rows = jobs.map(j=>{
+    const hasOverride = Object.prototype.hasOwnProperty.call(overrides, j.id);
+    const roleDefault = roleDefaultJobVisible(j.id, m);
+    const effective = hasOverride ? !!overrides[j.id] : roleDefault;
+    return `
+    <div class="log-entry" style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+      <div style="min-width:0;">
+        <div style="font-weight:700; font-size:13.5px;">${j.id} — ${esc(j.name)}</div>
+        <div class="issue-meta">${hasOverride ? `<span style="color:var(--safety); font-weight:700;">(custom)</span>` : `(role default: ${roleDefault?'visible':'hidden'})`}</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
+        <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;">
+          <input type="checkbox" ${effective?'checked':''} ${disabledAttr()} onchange="setJobOverride('${m.id}','${j.id}', this.checked)"> Visible
+        </label>
+        ${hasOverride ? `<button class="btn sm secondary" ${disabledAttr()} onclick="clearJobOverride('${m.id}','${j.id}')">Reset</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="modal" style="max-width:600px;">
+    <h3>Job access — ${esc(m.name)}</h3>
+    <p class="sub">${esc(m.role)} · these overrides apply to ${esc(m.name)} specifically, on top of their role's normal defaults — everyone else with the same role is unaffected. Toggle any job on or off just for them; "Reset" clears that override and goes back to what their role normally sees.</p>
+    ${jobs.length===0 ? `<div class="issue-meta">No jobs yet.</div>` : rows}
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Done</button></div>
+  </div>`;
+}
+function refreshJobOverridesPanel(memberId){
+  const m = state.team.find(x=>x.id===memberId);
+  const overlay = document.querySelector('.modal-overlay');
+  if(overlay && m && overlay.dataset.jobOverridesMemberId===memberId) overlay.innerHTML = jobOverridesPanelHTML(m);
+}
+function setJobOverride(memberId, jobId, visible){
+  if(!canManageJobOverrides()) return;
+  const m = state.team.find(x=>x.id===memberId);
+  if(!m) return;
+  const overrides = Object.assign({}, m.jobOverrides||{});
+  overrides[jobId] = !!visible;
+  commit({type:'updateTeamMember', id:memberId, patch:{jobOverrides:overrides}});
+  refreshJobOverridesPanel(memberId);
+}
+function clearJobOverride(memberId, jobId){
+  if(!canManageJobOverrides()) return;
+  const m = state.team.find(x=>x.id===memberId);
+  if(!m) return;
+  const overrides = Object.assign({}, m.jobOverrides||{});
+  delete overrides[jobId];
+  commit({type:'updateTeamMember', id:memberId, patch:{jobOverrides:overrides}});
+  refreshJobOverridesPanel(memberId);
+}
+
 /* ---- Home: combined look-ahead across all jobs ---- */
 function collectLookAhead(){
   const items = [];
@@ -3341,8 +3578,15 @@ function renderLookAhead(){
   // Engineering Manager's home screen is engineering-focused (see renderHome)
   // — the general Look Ahead narrows to just drafting requests for them,
   // with the header updated so it's clear why it looks different from other
-  // roles' full four-type view.
+  // roles' full four-type view. Operations Manager's home screen replaces
+  // this section entirely with renderOpsContractCostOverview() (see its call
+  // site in renderHome, right next to this one) — Greg: "Operations Manager
+  // does not necessarily need to see look ahead information for all jobs. He
+  // is more of the contract and cost person" — so this returns nothing for
+  // that role, same self-gating pattern every other role-specific home
+  // section here already uses (e.g. renderOpsCalendarSection below).
   const me = getEffectiveTeamMember();
+  if(me && me.role==='Operations Manager') return '';
   const engOnly = !!(me && me.role==='Engineering Manager');
   const items = engOnly ? collectLookAhead().filter(it=>it.type==='Drafting') : collectLookAhead();
   if(!items.length) return '';
@@ -3373,6 +3617,93 @@ function renderLookAhead(){
   return `
     <div class="section-title" style="margin-top:28px;">${engOnly ? 'Look ahead — engineering items only' : 'Look ahead — tasks needing to get done, all jobs'}</div>
     ${rows}`;
+}
+
+/* ---- Home: Operations Manager contract/cost overview ----
+   Greg: "Operations Manager does not necessarily need to see look ahead
+   information for all jobs. He is more of the contract and cost person."
+   Replaces the generic Look Ahead digest for this role only (see
+   renderLookAhead's Operations Manager gate just above, and this function's
+   call site in renderHome right next to it) — the toggle-able all-jobs/
+   single-job schedule calendar (renderOpsCalendarSection) and every other
+   home section are untouched; this only swaps out Look Ahead and, since
+   Operations Manager isn't a PM-briefing audience either, renderBriefing
+   (see its own gate).
+   Pulls together three EXISTING data sources rather than inventing new
+   state, across every job this Operations Manager can currently see
+   (isJobVisible/visibleJobs() — so the per-person job-visibility overrides
+   above apply here automatically, same as the rest of the home screen):
+   open Cost Impacts (state.issues, same "open" = not Converted definition
+   the job cards already use via openCount), a budget-vs-actual flag per job
+   reusing the EXACT Green-Sheet-vs-Invoice math renderBudgetCosts already
+   does (spent = invoices matching a budget line's Green Sheet cost code,
+   summed; hoursPctClass's over/warn thresholds), and open Change Orders
+   (state.cos, same CO_OPEN_DONE_STATES the job cards already use). A
+   home-screen digest, not a full report — each row links straight into the
+   relevant job/tab, same click-through convention as renderLookAhead. */
+function renderOpsContractCostOverview(){
+  const me = getEffectiveTeamMember();
+  if(!me || me.role!=='Operations Manager') return '';
+  const jobs = visibleJobs().slice().sort((a,b)=>a.id.localeCompare(b.id));
+  if(jobs.length===0) return '';
+
+  const impactRows = jobs.map(job=>{
+    const open = state.issues.filter(i=>i.jobId===job.id && i.status!=='Converted');
+    if(!open.length) return null;
+    const pending = open.filter(i=>i.status==='Pending Review').length;
+    return `<div class="log-entry" style="cursor:pointer;" onclick="ui.costSubTab='impacts'; openJob('${job.id}','costs')">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <div style="min-width:0;"><div class="issue-meta">${job.id} — ${esc(job.name)}</div>
+        <div style="font-weight:700; font-size:13.5px;">${open.length} open cost impact${open.length>1?'s':''}${pending?` · ${pending} awaiting pricing`:''}</div></div>
+        <div class="hrs-pct ${pending?'warn':'ok'}">${open.length}</div>
+      </div>
+    </div>`;
+  }).filter(Boolean).join('');
+
+  const budgetRows = jobs.map(job=>{
+    const greenSheets = state.greenSheets.filter(g=>g.jobId===job.id);
+    const invoices = state.invoices.filter(i=>i.jobId===job.id);
+    const flagged = greenSheets.filter(g=>!!g.costCode).map(g=>{
+      const spent = invoices.filter(i=>i.costCode===g.costCode).reduce((s,i)=>s+Number(i.amount||0),0);
+      return { g, spent, cls: hoursPctClass(spent, g.budget) };
+    }).filter(f=>f.cls==='over' || f.cls==='warn');
+    if(!flagged.length) return null;
+    const worst = flagged.some(f=>f.cls==='over') ? 'over' : 'warn';
+    const lines = flagged.map(f=>`${esc(f.g.system||f.g.scope||f.g.costCode)} (${fmtMoney(f.spent)} of ${fmtMoney(f.g.budget)})`).join(', ');
+    return `<div class="log-entry" style="cursor:pointer;" onclick="openJob('${job.id}','budgetcosts')">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <div style="min-width:0;"><div class="issue-meta">${job.id} — ${esc(job.name)}</div>
+        <div style="font-weight:700; font-size:13.5px;">${worst==='over'?'Over budget':'Near budget'} — ${lines}</div></div>
+        <div class="hrs-pct ${worst}">${worst==='over'?'Over':'Near'}</div>
+      </div>
+    </div>`;
+  }).filter(Boolean).join('');
+
+  const coRows = jobs.map(job=>{
+    const cos = state.cos.filter(c=>c.jobId===job.id);
+    const open = cos.filter(c=>!CO_OPEN_DONE_STATES.includes(c.status));
+    if(!open.length) return null;
+    const total = open.reduce((s,c)=>s+(c.cost!=null?Number(c.cost):0),0);
+    return `<div class="log-entry" style="cursor:pointer;" onclick="openJob('${job.id}','costs'); ui.costSubTab='changeorders'; render();">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <div style="min-width:0;"><div class="issue-meta">${job.id} — ${esc(job.name)}</div>
+        <div style="font-weight:700; font-size:13.5px;">${open.length} open change order${open.length>1?'s':''}${total?` · ${fmtMoney(total)} pending`:''}</div></div>
+        <div class="hrs-pct warn">${open.length}</div>
+      </div>
+    </div>`;
+  }).filter(Boolean).join('');
+
+  if(!impactRows && !budgetRows && !coRows){
+    return `
+    <div class="section-title" style="margin-top:28px;">Contract &amp; cost overview</div>
+    <div class="issue-meta">Nothing flagged right now — no open cost impacts, no jobs over or near budget, and no open change orders across your jobs.</div>`;
+  }
+  return `
+    <div class="section-title" style="margin-top:28px;">Contract &amp; cost overview</div>
+    <div class="issue-meta" style="margin-bottom:10px;">Cost impacts, budget-vs-actual, and change orders across your jobs — tap a row to jump straight to that job's tab.</div>
+    ${impactRows ? `<div class="section-title" style="margin-top:0; font-size:12px;">Open cost impacts</div>${impactRows}` : ''}
+    ${budgetRows ? `<div class="section-title" style="margin-top:14px; font-size:12px;">Budget vs actual</div>${budgetRows}` : ''}
+    ${coRows ? `<div class="section-title" style="margin-top:14px; font-size:12px;">Open change orders</div>${coRows}` : ''}`;
 }
 
 /* ---- Calendar legend: job color key + status/procurement color key, shared by
@@ -3461,9 +3792,12 @@ function renderBriefing(){
   // consolidated calendar instead (see renderSuperintendentScheduleSection).
   // Engineering Manager: their home screen is a decluttered engineering-only
   // quick-access page (see renderHome's Engineering Manager section below) —
-  // the PM briefing isn't engineering-relevant either.
+  // the PM briefing isn't engineering-relevant either. Operations Manager:
+  // "the contract and cost person," not a PM-briefing audience — their home
+  // screen gets renderOpsContractCostOverview() instead (see renderLookAhead's
+  // matching gate and renderHome's call site).
   const me = getEffectiveTeamMember();
-  if(me && (me.role==='Superintendent' || me.role==='Engineering Manager')) return '';
+  if(me && (me.role==='Superintendent' || me.role==='Engineering Manager' || me.role==='Operations Manager')) return '';
   if(visibleJobs().length===0) return '';
   const today = todayStr();
   const lookAheadItems = collectLookAhead();
