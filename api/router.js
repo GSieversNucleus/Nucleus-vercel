@@ -21,6 +21,7 @@ const store = require('../lib/store');
 const auth = require('../lib/auth');
 const roles = require('../lib/roles');
 const webpush = require('../lib/webpush');
+const { geocodeAddress } = require('../lib/geocode');
 
 const MAX_BODY_BYTES = 20 * 1024 * 1024; // 20MB — matches the app's own MAX_STATE_BYTES headroom
 
@@ -379,6 +380,30 @@ module.exports = async (req, res) => {
       const endpoint = body && body.endpoint;
       if (endpoint) await store.removePushSub(endpoint);
       return sendJSON(res, 200, { ok: true });
+    }
+
+    // ---- Jobs Map: turn one job's typed address into map coordinates via
+    // OpenStreetMap's free Nominatim service (see lib/geocode.js — it
+    // handles its own caching and the 1-request/second throttle Nominatim's
+    // usage policy requires, both in Redis since this function has no
+    // reliable memory between invocations). Requires a session, same as
+    // everything else that touches job data, even though the address
+    // itself isn't sensitive — no reason to let an unauthenticated caller
+    // use this server as a free geocoding proxy for something unrelated to
+    // Nucleus. ----
+    if (req.method === 'GET' && url === '/api/geocode') {
+      const identity = await store.getSession(getBearerToken(req));
+      if (!identity) return sendJSON(res, 401, { error: 'not_authenticated' });
+      const address = new URL(req.url, 'http://internal').searchParams.get('address');
+      if (!address || !address.trim()) return sendJSON(res, 400, { error: 'missing_address' });
+      try {
+        const result = await geocodeAddress(address.trim());
+        if (!result) return sendJSON(res, 404, { error: 'not_found' });
+        return sendJSON(res, 200, result);
+      } catch (e) {
+        console.error('Geocode failed:', e);
+        return sendJSON(res, 502, { error: 'geocode_failed' });
+      }
     }
 
     if (url === '/data/state.json' || url === '/api/state') {
