@@ -4902,24 +4902,51 @@ function renderGreenSheetRundown(job){
   if(docs.length===0) return '';
   // Flatten every doc into its rundown line(s) — one per workbook tab that
   // parsed (greenSheetDocLines handles both the new multi-tab shape and an
-  // older doc's flat single-line shape). A doc that yielded no lines at all
-  // (parse error, or a PDF-only upload) still gets exactly one fallback row
-  // so it's not just missing from the list, and that row is still editable —
-  // Edit lets Greg key in the numbers by hand when the auto-parse can't.
+  // older doc's flat single-line shape). Per Greg directly: the FIRST tab of
+  // a Green Sheet workbook is always its own total across every other tab —
+  // not a system — so greenSheetLines[0] for each doc is pulled out as that
+  // doc's Total (shown big/bold above the table, not as a system row), and
+  // there's no separate computed sum-of-all-rows footer any more — the total
+  // IS tab 1, not something this app should be re-deriving. This also
+  // applies cleanly to every doc uploaded before multi-tab parsing existed:
+  // the old parser only ever read the first sheet, so what those docs
+  // already have stored was always the total, just mislabeled as "the
+  // system" in the old single-row rundown — nothing about that old data
+  // needs to change, it now just displays correctly as a Total.
+  // A doc that yielded no lines at all (parse error, or a PDF-only upload)
+  // still gets exactly one fallback row in the systems table, still
+  // editable — Edit lets Greg key in the numbers by hand when the auto-parse
+  // can't (that hand-filled line becomes that doc's Total, since it's always
+  // index 0 — the one asymmetry worth knowing about, but a rare case since
+  // it only applies to a doc whose auto-parse failed completely).
+  const totalsEntries = [];
   const rowDescs = [];
   docs.forEach(d=>{
     const docIdx = job.contractDocs.indexOf(d);
     const lines = greenSheetDocLines(d);
     if(lines.length>0){
-      lines.forEach((line, lineIdx)=>rowDescs.push({ doc:d, docIdx, line, lineIdx }));
+      totalsEntries.push({ doc:d, docIdx, line:lines[0], lineIdx:0 });
+      lines.slice(1).forEach((line, i)=>rowDescs.push({ doc:d, docIdx, line, lineIdx:i+1 }));
     } else {
       rowDescs.push({ doc:d, docIdx, line:null, lineIdx:0 });
     }
   });
-  const parsedRows = rowDescs.filter(r=>r.line && (r.line.systemNo || r.line.systemName || r.line.materialTotal!=null || r.line.shopHours!=null || r.line.fieldHours!=null));
-  const totalMaterial = parsedRows.reduce((s,r)=>s+(Number(r.line.materialTotal)||0),0);
-  const totalShop = parsedRows.reduce((s,r)=>s+(Number(r.line.shopHours)||0),0);
-  const totalField = parsedRows.reduce((s,r)=>s+(Number(r.line.fieldHours)||0),0);
+  const totalMaterial = totalsEntries.reduce((s,t)=>s+(Number(t.line.materialTotal)||0),0);
+  const totalShop = totalsEntries.reduce((s,t)=>s+(Number(t.line.shopHours)||0),0);
+  const totalField = totalsEntries.reduce((s,t)=>s+(Number(t.line.fieldHours)||0),0);
+  const totalsBlock = totalsEntries.length>0 ? `
+    <div style="margin:10px 0 18px; padding:14px 16px; background:var(--gray-dim); border:1.5px solid var(--line-strong); border-radius:var(--radius);">
+      <div style="font-family:var(--sans); font-weight:700; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted); margin-bottom:8px;">Green Sheet total${totalsEntries.length>1?'s':''} (tab 1 of each workbook)</div>
+      ${totalsEntries.map(t=>`
+        <div style="display:flex; flex-wrap:wrap; align-items:baseline; gap:24px; ${totalsEntries.length>1?'margin-bottom:8px;':''}">
+          <div style="font-family:var(--disp); font-weight:800; font-size:24px;">${t.line.materialTotal!=null?fmtMoney(t.line.materialTotal):'—'}</div>
+          <div style="font-size:15px;"><span style="font-weight:800; font-size:17px;">${t.line.shopHours!=null?t.line.shopHours.toLocaleString():'—'}</span> shop hrs</div>
+          <div style="font-size:15px;"><span style="font-weight:800; font-size:17px;">${t.line.fieldHours!=null?t.line.fieldHours.toLocaleString():'—'}</span> field hrs</div>
+          ${!readOnly ? `<button class="btn sm secondary" onclick="openGreenSheetLineEdit('${job.id}', ${t.docIdx}, 0)" title="Edit this total">${icon('edit')}</button>` : ''}
+          ${totalsEntries.length>1 ? `<div class="issue-meta" style="width:100%;">${esc(t.doc.name)}${t.line.systemName?` — ${esc(t.line.systemName)}`:''}</div>` : ''}
+        </div>`).join('')}
+      ${!readOnly ? `<button class="btn sm safety" style="margin-top:4px;" onclick="applyGreenSheetHoursToJob('${job.id}', ${totalField}, ${totalShop})">${icon('clipboardList')} Apply totals to Bid Hours</button>` : ''}
+    </div>` : '';
   const rows = rowDescs.map(r=>{
     const editBtn = readOnly ? '' : `<button class="btn sm secondary" onclick="openGreenSheetLineEdit('${job.id}', ${r.docIdx}, ${r.lineIdx})" title="Edit this line">${icon('edit')}</button>`;
     if(!r.line){
@@ -4942,14 +4969,13 @@ function renderGreenSheetRundown(job){
   }).join('');
   return `
     <div class="section-title" style="margin-top:22px;">Green Sheet rundown</div>
-    <div class="issue-meta" style="margin-bottom:10px;">Read straight off every tab of each uploaded Green Sheet workbook — System # (D1), System (E1), Material Total (G49), Shop Hours (C22), Field Hours (C60). One row per tab that has data; use Edit to correct or fill in a line by hand.</div>
-    <div style="overflow-x:auto;">
+    <div class="issue-meta" style="margin-bottom:10px;">Tab 1 of each uploaded Green Sheet workbook is its total across every other tab (shown above, big and bold); the remaining tabs are the individual systems — System # (D1), System (E1), Material Total (G49), Shop Hours (C22), Field Hours (C60). Use Edit to correct or fill in a line by hand.</div>
+    ${totalsBlock}
+    ${rowDescs.length>0 ? `<div style="overflow-x:auto;">
     <table><thead><tr><th>System #</th><th>System</th><th>Material Total</th><th>Shop Hours</th><th>Field Hours</th><th></th><th></th></tr></thead>
     <tbody>${rows}</tbody>
-    ${parsedRows.length>0 ? `<tfoot><tr style="font-weight:700;"><td colspan="2">Total (${parsedRows.length} system${parsedRows.length>1?'s':''})</td><td>${fmtMoney(totalMaterial)}</td><td>${totalShop.toLocaleString()}</td><td>${totalField.toLocaleString()}</td><td></td><td></td></tr></tfoot>` : ''}
     </table>
-    </div>
-    ${(!readOnly && parsedRows.length>0) ? `<button class="btn sm safety" style="margin-top:10px;" onclick="applyGreenSheetHoursToJob('${job.id}', ${totalField}, ${totalShop})">${icon('clipboardList')} Apply totals to Bid Hours</button>` : ''}`;
+    </div>` : ''}`;
 }
 // Opens the edit modal for one Green Sheet rundown line — docIdx is the
 // index into job.contractDocs (stable per render, same convention as
