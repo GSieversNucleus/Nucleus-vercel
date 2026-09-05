@@ -5019,7 +5019,26 @@ function greenSheetSystemDetailHTML(job, doc, docIdx, line, lineIdx){
         <span style="color:var(--text-muted); font-size:13px;">${label}</span>
         <span style="${big?'font-family:var(--disp); font-weight:800; font-size:22px;':'font-weight:700; font-size:16px;'}">${value}</span>
       </div>`;
-  return `<div class="modal" style="max-width:480px;">
+  // Per Greg directly: clicking a system should show the material budget
+  // breakdown that makes up that system's total — the individual Cost
+  // Code / Description / Cost per Sq Ft / Total Cost lines from the D:G
+  // block above the workbook's Material Total (see parseGreenSheetMaterialLines).
+  // Only present on docs parsed with this feature; older docs and hand-filled
+  // fallback lines simply don't have it, so the table is skipped for those.
+  const materialLines = Array.isArray(line.materialLines) ? line.materialLines : [];
+  const materialTable = materialLines.length>0 ? `
+    <div class="section-title" style="margin-top:20px; font-size:12px;">Material budget breakdown</div>
+    <div style="overflow-x:auto; margin-top:6px;">
+    <table><thead><tr><th>Cost Code</th><th>Description of Material</th><th>Cost per Sq Ft</th><th>Total Cost</th></tr></thead>
+    <tbody>${materialLines.map(m=>`<tr>
+      <td data-label="Cost Code" class="idcell">${esc(m.costCode)}</td>
+      <td data-label="Description of Material">${esc(m.description)}</td>
+      <td data-label="Cost per Sq Ft">${m.costPerSqFt!=null?fmtMoney(m.costPerSqFt):'—'}</td>
+      <td data-label="Total Cost">${fmtMoney(m.totalCost)}</td>
+    </tr>`).join('')}</tbody>
+    </table>
+    </div>` : '';
+  return `<div class="modal" style="max-width:${materialLines.length>0?'640px':'480px'};">
     <h3>${esc(line.systemName || (line.systemNo?`System ${line.systemNo}`:'System detail'))}</h3>
     <p class="sub">${esc(doc.name)}${line.sheetName?` — ${esc(line.sheetName)}`:''}</p>
     <div style="display:flex; flex-direction:column; gap:14px; margin:18px 0;">
@@ -5029,6 +5048,7 @@ function greenSheetSystemDetailHTML(job, doc, docIdx, line, lineIdx){
       ${row('Shop Hours', line.shopHours!=null?line.shopHours.toLocaleString():'—')}
       ${row('Field Hours', line.fieldHours!=null?line.fieldHours.toLocaleString():'—')}
     </div>
+    ${materialTable}
     <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Close</button>
     ${!readOnly ? `<button class="btn safety" onclick="closeModal(); openGreenSheetLineEdit('${job.id}', ${docIdx}, ${lineIdx});">${icon('edit')} Edit</button>` : ''}</div>
   </div>`;
@@ -5205,6 +5225,37 @@ function cellNumber(ws, ref){
   if(typeof v === 'string') return Number(v.replace(/[^0-9.\-]/g,''));
   return NaN;
 }
+// The material budget breakdown that backs each system's Material Total
+// (G49 — see parseGreenSheetWorkbook). Per Greg directly: "Column D = Cost
+// Code, Column E = Description of Material, Column F = Cost per Sq Ft,
+// Column G equals total cost" and the block runs from just under the D1/E1
+// header down to the G49 total. Row 49 itself is excluded here since it's
+// already captured separately as materialTotal — this only covers the
+// individual line items that sum into it (rows 2-48; rows 2-7 are workbook
+// header/rate cells like "Shop Labor Rate" with no Cost Code in column D,
+// so requiring a Cost Code is what keeps those out without hardcoding a
+// higher start row). A line only counts if it actually carries budget
+// dollars (Total Cost non-zero) — most cost codes on a given tab are
+// unused categories left at 0, and listing all ~40 of them per system
+// would bury the ones that matter.
+function parseGreenSheetMaterialLines(ws){
+  const out = [];
+  for(let row=2; row<=48; row++){
+    const costCode = cellValue(ws, 'D'+row);
+    const description = cellValue(ws, 'E'+row);
+    if(costCode==null || costCode==='' || description==null || description==='') continue;
+    const totalCost = cellNumber(ws, 'G'+row);
+    if(isNaN(totalCost) || totalCost===0) continue;
+    const costPerSqFt = cellNumber(ws, 'F'+row);
+    out.push({
+      costCode: String(costCode),
+      description: String(description).trim(),
+      costPerSqFt: isNaN(costPerSqFt) ? null : costPerSqFt,
+      totalCost,
+    });
+  }
+  return out;
+}
 async function parseGreenSheetWorkbook(file){
   if(typeof XLSX==='undefined'){
     return { parseError: "Couldn't read this workbook right now (needs an internet connection to load the spreadsheet reader) — the rundown will skip it until it's re-uploaded with a connection available." };
@@ -5231,6 +5282,7 @@ async function parseGreenSheetWorkbook(file){
         materialTotal: isNaN(materialTotal) ? null : materialTotal,
         shopHours: isNaN(shopHours) ? null : shopHours,
         fieldHours: isNaN(fieldHours) ? null : fieldHours,
+        materialLines: parseGreenSheetMaterialLines(ws),
       });
     }
     if(lines.length===0){
