@@ -875,6 +875,11 @@ let ui = { view: 'home', jobId: null, tab: 'overview', costSubTab: 'impacts', co
   // any time the role changes or preview exits (setPreviewRole/exitPreview/
   // setCurrentTeamMember) so a stale pick never carries into a new preview.
   previewMemberId: null,
+  // Green Sheet rundown inline-edit target: {jobId, docIdx, lineIdx} for the
+  // row currently open in the 'greensheet-line' modal — see
+  // openGreenSheetLineEdit/submitGreenSheetLine below. Null when no such
+  // modal is open.
+  gsEditRef: null,
   // Superintendent's consolidated home calendar (scope + type toggle, shares
   // renderRoleCalendarSection with Operations' calendar above) — month reuses
   // superSchedMonth above rather than a redundant key. jobId '' means "all jobs".
@@ -2362,6 +2367,32 @@ function applyOp(op, s){
     case 'removeJobDoc': {
       const jr = s.jobs.find(x=>x.id===op.jobId);
       if(jr && jr.contractDocs) jr.contractDocs.splice(op.index, 1);
+      break;
+    }
+    case 'updateGreenSheetLine': {
+      // Hand-edit of one Green Sheet rundown line (see openGreenSheetLineEdit/
+      // submitGreenSheetLine). A doc uploaded before multi-tab parsing existed
+      // still carries its five values flat instead of in a greenSheetLines
+      // array — migrate it into a one-line array the first time it's edited,
+      // same lazy-migration pattern used elsewhere in this reducer, rather
+      // than requiring Greg to re-upload anything.
+      const jg = s.jobs.find(x=>x.id===op.jobId);
+      const doc = jg && jg.contractDocs && jg.contractDocs[op.docIdx];
+      if(doc){
+        if(!Array.isArray(doc.greenSheetLines)){
+          doc.greenSheetLines = [{
+            sheetName: doc.sheetName || '',
+            systemNo: doc.systemNo || '',
+            systemName: doc.systemName || '',
+            materialTotal: doc.materialTotal!=null ? doc.materialTotal : null,
+            shopHours: doc.shopHours!=null ? doc.shopHours : null,
+            fieldHours: doc.fieldHours!=null ? doc.fieldHours : null,
+          }];
+        }
+        if(!doc.greenSheetLines[op.lineIdx]) doc.greenSheetLines[op.lineIdx] = { sheetName:'' };
+        Object.assign(doc.greenSheetLines[op.lineIdx], op.patch, { edited:true });
+        doc.parseError = null; // a hand-filled line supersedes a whole-doc parse error
+      }
       break;
     }
     case 'addGreenSheet': s.greenSheets.push(op.entry); break;
@@ -4869,38 +4900,87 @@ function contractDocsListHTML(job, docType){
 function renderGreenSheetRundown(job){
   const docs = (job.contractDocs||[]).filter(d=>d.docType==='Green Sheet');
   if(docs.length===0) return '';
-  const parsed = docs.filter(d=>d.parseError==null && (d.systemNo || d.systemName || d.materialTotal!=null || d.shopHours!=null || d.fieldHours!=null));
-  const totalMaterial = parsed.reduce((s,d)=>s+(Number(d.materialTotal)||0),0);
-  const totalShop = parsed.reduce((s,d)=>s+(Number(d.shopHours)||0),0);
-  const totalField = parsed.reduce((s,d)=>s+(Number(d.fieldHours)||0),0);
-  const rows = docs.map(d=>{
-    if(d.parseError){
-      return `<tr><td data-label="System #">—</td><td data-label="System">${esc(d.name)}</td><td data-label="Material Total">—</td><td data-label="Shop Hours">—</td><td data-label="Field Hours">—</td><td data-label="Note" colspan="1" style="color:var(--text-muted); font-size:12px;">${esc(d.parseError)}</td></tr>`;
+  // Flatten every doc into its rundown line(s) — one per workbook tab that
+  // parsed (greenSheetDocLines handles both the new multi-tab shape and an
+  // older doc's flat single-line shape). A doc that yielded no lines at all
+  // (parse error, or a PDF-only upload) still gets exactly one fallback row
+  // so it's not just missing from the list, and that row is still editable —
+  // Edit lets Greg key in the numbers by hand when the auto-parse can't.
+  const rowDescs = [];
+  docs.forEach(d=>{
+    const docIdx = job.contractDocs.indexOf(d);
+    const lines = greenSheetDocLines(d);
+    if(lines.length>0){
+      lines.forEach((line, lineIdx)=>rowDescs.push({ doc:d, docIdx, line, lineIdx }));
+    } else {
+      rowDescs.push({ doc:d, docIdx, line:null, lineIdx:0 });
     }
-    if(d.systemNo==null && d.systemName==null && d.materialTotal==null){
-      // A PDF or other non-workbook Green Sheet upload — not an error, just
-      // nothing this rundown can read cells out of.
-      return `<tr><td data-label="System #">—</td><td data-label="System">${esc(d.name)}</td><td data-label="Material Total">—</td><td data-label="Shop Hours">—</td><td data-label="Field Hours">—</td><td style="color:var(--text-muted); font-size:12px;">PDF — upload the workbook (.xlsx) version to include it here</td></tr>`;
+  });
+  const parsedRows = rowDescs.filter(r=>r.line && (r.line.systemNo || r.line.systemName || r.line.materialTotal!=null || r.line.shopHours!=null || r.line.fieldHours!=null));
+  const totalMaterial = parsedRows.reduce((s,r)=>s+(Number(r.line.materialTotal)||0),0);
+  const totalShop = parsedRows.reduce((s,r)=>s+(Number(r.line.shopHours)||0),0);
+  const totalField = parsedRows.reduce((s,r)=>s+(Number(r.line.fieldHours)||0),0);
+  const rows = rowDescs.map(r=>{
+    const editBtn = readOnly ? '' : `<button class="btn sm secondary" onclick="openGreenSheetLineEdit('${job.id}', ${r.docIdx}, ${r.lineIdx})" title="Edit this line">${icon('edit')}</button>`;
+    if(!r.line){
+      const note = r.doc.parseError
+        ? `<span style="color:var(--text-muted); font-size:12px;">${esc(r.doc.parseError)}</span>`
+        : `<span style="color:var(--text-muted); font-size:12px;">PDF — upload the workbook (.xlsx) version, or use Edit to key this system in by hand</span>`;
+      return `<tr><td data-label="System #">—</td><td data-label="System">—<div class="issue-meta" style="margin-top:2px;">${esc(r.doc.name)}</div></td><td data-label="Material Total">—</td><td data-label="Shop Hours">—</td><td data-label="Field Hours">—</td><td data-label="Note">${note}</td><td data-label="">${editBtn}</td></tr>`;
     }
+    const line = r.line;
+    const sourceNote = `<div class="issue-meta" style="margin-top:2px;">${esc(r.doc.name)}${line.sheetName?` — ${esc(line.sheetName)}`:''}</div>`;
     return `<tr>
-      <td data-label="System #" class="idcell">${esc(d.systemNo||'—')}</td>
-      <td data-label="System">${esc(d.systemName||'—')}</td>
-      <td data-label="Material Total">${d.materialTotal!=null?fmtMoney(d.materialTotal):'—'}</td>
-      <td data-label="Shop Hours">${d.shopHours!=null?d.shopHours.toLocaleString():'—'}</td>
-      <td data-label="Field Hours">${d.fieldHours!=null?d.fieldHours.toLocaleString():'—'}</td>
+      <td data-label="System #" class="idcell">${esc(line.systemNo||'—')}</td>
+      <td data-label="System">${esc(line.systemName||'—')}${sourceNote}</td>
+      <td data-label="Material Total">${line.materialTotal!=null?fmtMoney(line.materialTotal):'—'}</td>
+      <td data-label="Shop Hours">${line.shopHours!=null?line.shopHours.toLocaleString():'—'}</td>
+      <td data-label="Field Hours">${line.fieldHours!=null?line.fieldHours.toLocaleString():'—'}</td>
       <td></td>
+      <td data-label="">${editBtn}</td>
     </tr>`;
   }).join('');
   return `
     <div class="section-title" style="margin-top:22px;">Green Sheet rundown</div>
-    <div class="issue-meta" style="margin-bottom:10px;">Read straight off each uploaded Green Sheet workbook — System # (D1), System (E1), Material Total (G49), Shop Hours (C22), Field Hours (C60). One row per uploaded file.</div>
+    <div class="issue-meta" style="margin-bottom:10px;">Read straight off every tab of each uploaded Green Sheet workbook — System # (D1), System (E1), Material Total (G49), Shop Hours (C22), Field Hours (C60). One row per tab that has data; use Edit to correct or fill in a line by hand.</div>
     <div style="overflow-x:auto;">
-    <table><thead><tr><th>System #</th><th>System</th><th>Material Total</th><th>Shop Hours</th><th>Field Hours</th><th></th></tr></thead>
+    <table><thead><tr><th>System #</th><th>System</th><th>Material Total</th><th>Shop Hours</th><th>Field Hours</th><th></th><th></th></tr></thead>
     <tbody>${rows}</tbody>
-    ${parsed.length>0 ? `<tfoot><tr style="font-weight:700;"><td colspan="2">Total (${parsed.length} system${parsed.length>1?'s':''})</td><td>${fmtMoney(totalMaterial)}</td><td>${totalShop.toLocaleString()}</td><td>${totalField.toLocaleString()}</td><td></td></tr></tfoot>` : ''}
+    ${parsedRows.length>0 ? `<tfoot><tr style="font-weight:700;"><td colspan="2">Total (${parsedRows.length} system${parsedRows.length>1?'s':''})</td><td>${fmtMoney(totalMaterial)}</td><td>${totalShop.toLocaleString()}</td><td>${totalField.toLocaleString()}</td><td></td><td></td></tr></tfoot>` : ''}
     </table>
     </div>
-    ${(!readOnly && parsed.length>0) ? `<button class="btn sm safety" style="margin-top:10px;" onclick="applyGreenSheetHoursToJob('${job.id}', ${totalField}, ${totalShop})">${icon('clipboardList')} Apply totals to Bid Hours</button>` : ''}`;
+    ${(!readOnly && parsedRows.length>0) ? `<button class="btn sm safety" style="margin-top:10px;" onclick="applyGreenSheetHoursToJob('${job.id}', ${totalField}, ${totalShop})">${icon('clipboardList')} Apply totals to Bid Hours</button>` : ''}`;
+}
+// Opens the edit modal for one Green Sheet rundown line — docIdx is the
+// index into job.contractDocs (stable per render, same convention as
+// removeJobDoc), lineIdx is the index into that doc's greenSheetLines
+// (0 for a doc that hasn't been migrated to the array shape yet, or has no
+// parsed data at all — see submitGreenSheetLine for the migration/creation).
+function openGreenSheetLineEdit(jobId, docIdx, lineIdx){
+  const job = getJob(jobId);
+  const doc = job && job.contractDocs && job.contractDocs[docIdx];
+  if(!doc) return;
+  const lines = greenSheetDocLines(doc);
+  const line = lines[lineIdx] || { sheetName:'', systemNo:'', systemName:'', materialTotal:null, shopHours:null, fieldHours:null };
+  ui.gsEditRef = { jobId, docIdx, lineIdx, line };
+  openModal('greensheet-line');
+}
+function submitGreenSheetLine(){
+  const ref = ui.gsEditRef;
+  if(!ref) return;
+  const systemNo = document.getElementById('f-gs-systemno').value.trim();
+  const systemName = document.getElementById('f-gs-systemname').value.trim();
+  const mat = document.getElementById('f-gs-material').value;
+  const shop = document.getElementById('f-gs-shop').value;
+  const field = document.getElementById('f-gs-field').value;
+  commit({type:'updateGreenSheetLine', jobId: ref.jobId, docIdx: ref.docIdx, lineIdx: ref.lineIdx, patch: {
+    systemNo, systemName,
+    materialTotal: mat===''?null:Number(mat),
+    shopHours: shop===''?null:Number(shop),
+    fieldHours: field===''?null:Number(field),
+  }});
+  ui.gsEditRef = null;
+  closeModal();
 }
 // Deliberately a confirm-gated button click, not something that runs
 // automatically on every render or every upload — this overwrites the job's
@@ -5015,18 +5095,30 @@ function renderContract(job){
     <input type="file" id="contract-doc-input" multiple style="display:none;" onchange="handleContractDocSelect(event,'${job.id}','Contract')">`}`;
 }
 /* ---- Green Sheet rundown (Budget and Costs): reads five fixed cells out of
-   each uploaded Green Sheet WORKBOOK (not PDF — a PDF's cells aren't
-   machine-readable the way a real .xlsx/.xls/.xlsm's are) via SheetJS —
+   EVERY TAB of each uploaded Green Sheet WORKBOOK (not PDF — a PDF's cells
+   aren't machine-readable the way a real .xlsx/.xls/.xlsm's are) via SheetJS —
    System # (D1), System (E1), Material Total (G49), Shop Hours (C22), Field
-   Hours (C60), per Greg directly. Every Green Sheet C/S Erectors estimates
-   with is assumed to follow that same fixed layout (one workbook per system);
-   this does NOT attempt to auto-detect a different layout, so a workbook that
-   doesn't match reads back a parseError instead of wrong numbers. Parsing
-   happens once, right here at upload time, and the five values are stored
-   directly on the doc object alongside name/dataUrl — see
-   renderGreenSheetRundown below, which just reads them back synchronously;
-   this keeps the rest of the render path exactly as synchronous as it always
-   was, rather than threading an async spreadsheet-parse through render(). */
+   Hours (C60), per Greg directly. A workbook can carry one tab per system
+   rather than just one, so every tab is read with this same fixed mapping;
+   a tab that has none of the five values (a cover sheet, a notes tab) is
+   silently skipped rather than shown as a bogus parse error, and each tab
+   that does have data becomes its own rundown line item. This does NOT
+   attempt to auto-detect a different layout — a workbook where no tab
+   matches at all reads back a whole-document parseError instead of wrong
+   numbers. Parsing happens once, right here at upload time, and the parsed
+   lines are stored as doc.greenSheetLines (array, one entry per tab) —
+   see renderGreenSheetRundown below, which just reads them back
+   synchronously; this keeps the rest of the render path exactly as
+   synchronous as it always was, rather than threading an async
+   spreadsheet-parse through render(). Older docs uploaded before this array
+   existed still carry the five values flat on the doc itself instead of in
+   greenSheetLines — renderGreenSheetRundown and the updateGreenSheetLine
+   reducer both handle that shape too, migrating it into a one-line
+   greenSheetLines array the first time such a doc's line is edited, so nothing
+   already uploaded needs re-uploading. Each line can also be corrected by
+   hand from the rundown table (Edit button) — e.g. if a workbook doesn't
+   follow the standard layout, or a value needs a manual override — via the
+   'greensheet-line' modal / submitGreenSheetLine. */
 function cellValue(ws, ref){
   const cell = ws[ref];
   if(!cell) return undefined;
@@ -5052,28 +5144,55 @@ async function parseGreenSheetWorkbook(file){
   try{
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, {type:'array'});
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    if(!ws) return { parseError: 'This workbook has no sheets — check it uploaded correctly.' };
-    const systemNo = cellValue(ws,'D1');
-    const systemName = cellValue(ws,'E1');
-    const materialTotal = cellNumber(ws,'G49');
-    const shopHours = cellNumber(ws,'C22');
-    const fieldHours = cellNumber(ws,'C60');
-    if(systemNo===undefined && systemName===undefined && isNaN(materialTotal) && isNaN(shopHours) && isNaN(fieldHours)){
-      return { parseError: "Couldn't find any of the expected cells (D1/E1/G49/C22/C60) — check this workbook matches the standard Green Sheet layout." };
+    if(!wb.SheetNames || wb.SheetNames.length===0) return { parseError: 'This workbook has no sheets — check it uploaded correctly.' };
+    const lines = [];
+    for(const sheetName of wb.SheetNames){
+      const ws = wb.Sheets[sheetName];
+      if(!ws) continue;
+      const systemNo = cellValue(ws,'D1');
+      const systemName = cellValue(ws,'E1');
+      const materialTotal = cellNumber(ws,'G49');
+      const shopHours = cellNumber(ws,'C22');
+      const fieldHours = cellNumber(ws,'C60');
+      const hasAnything = systemNo!==undefined || systemName!==undefined || !isNaN(materialTotal) || !isNaN(shopHours) || !isNaN(fieldHours);
+      if(!hasAnything) continue; // tab doesn't match the layout — likely a cover/notes tab, not a system
+      lines.push({
+        sheetName,
+        systemNo: systemNo!=null ? String(systemNo) : '',
+        systemName: systemName!=null ? String(systemName) : '',
+        materialTotal: isNaN(materialTotal) ? null : materialTotal,
+        shopHours: isNaN(shopHours) ? null : shopHours,
+        fieldHours: isNaN(fieldHours) ? null : fieldHours,
+      });
     }
-    return {
-      systemNo: systemNo!=null ? String(systemNo) : '',
-      systemName: systemName!=null ? String(systemName) : '',
-      materialTotal: isNaN(materialTotal) ? null : materialTotal,
-      shopHours: isNaN(shopHours) ? null : shopHours,
-      fieldHours: isNaN(fieldHours) ? null : fieldHours,
-      parseError: null
-    };
+    if(lines.length===0){
+      return { parseError: "Couldn't find any of the expected cells (D1/E1/G49/C22/C60) on any tab — check this workbook matches the standard Green Sheet layout." };
+    }
+    return { greenSheetLines: lines, parseError: null };
   }catch(e){
     console.error('Green Sheet parse failed', e);
     return { parseError: "Couldn't read this workbook — check it's a real .xlsx/.xls file and matches the standard Green Sheet layout." };
   }
+}
+// Doc may be old-format (flat systemNo/systemName/materialTotal/shopHours/
+// fieldHours directly on it, from before multi-tab parsing existed) or
+// new-format (doc.greenSheetLines, one entry per workbook tab that parsed).
+// This always returns the array shape so rendering has one code path;
+// it does NOT mutate the doc — see updateGreenSheetLine for the reducer-side
+// migration that happens when a line is actually edited.
+function greenSheetDocLines(doc){
+  if(Array.isArray(doc.greenSheetLines)) return doc.greenSheetLines;
+  if(doc.parseError) return [];
+  const hasFlat = doc.systemNo || doc.systemName || doc.materialTotal!=null || doc.shopHours!=null || doc.fieldHours!=null;
+  if(!hasFlat) return [];
+  return [{
+    sheetName: doc.sheetName || '',
+    systemNo: doc.systemNo || '',
+    systemName: doc.systemName || '',
+    materialTotal: doc.materialTotal!=null ? doc.materialTotal : null,
+    shopHours: doc.shopHours!=null ? doc.shopHours : null,
+    fieldHours: doc.fieldHours!=null ? doc.fieldHours : null,
+  }];
 }
 function isSpreadsheetFile(file){ return /\.(xlsx|xls|xlsm)$/i.test(file.name||''); }
 async function handleContractDocSelect(ev, jobId, docType){
@@ -7793,6 +7912,24 @@ function modalHTML(type){
       <div class="err" id="f-err"></div>
       <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Cancel</button>
       <button class="btn safety" onclick="submitBudget()">Save</button></div>
+    </div>`;
+  }
+  if(type==='greensheet-line'){
+    const ref = ui.gsEditRef;
+    const line = (ref && ref.line) || { sheetName:'', systemNo:'', systemName:'', materialTotal:null, shopHours:null, fieldHours:null };
+    return `<div class="modal">
+      <h3>Edit Green Sheet line</h3><p class="sub">${line.sheetName?`Tab: ${esc(line.sheetName)} — `:''}corrects this one line in the rundown; the uploaded workbook itself isn't changed.</p>
+      <div class="field-row">
+        <div class="field"><label>System #</label><input id="f-gs-systemno" value="${esc(line.systemNo||'')}" placeholder="e.g. 01"></div>
+        <div class="field"><label>System</label><input id="f-gs-systemname" value="${esc(line.systemName||'')}" placeholder="e.g. Storefront"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Material Total</label><input type="number" id="f-gs-material" value="${line.materialTotal!=null?line.materialTotal:''}" placeholder="0" step="0.01"></div>
+        <div class="field"><label>Shop Hours</label><input type="number" id="f-gs-shop" value="${line.shopHours!=null?line.shopHours:''}" placeholder="0" step="0.5"></div>
+        <div class="field"><label>Field Hours</label><input type="number" id="f-gs-field" value="${line.fieldHours!=null?line.fieldHours:''}" placeholder="0" step="0.5"></div>
+      </div>
+      <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Cancel</button>
+      <button class="btn safety" onclick="submitGreenSheetLine()">Save</button></div>
     </div>`;
   }
   if(type==='hours'){
