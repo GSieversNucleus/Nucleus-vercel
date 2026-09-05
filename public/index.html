@@ -141,6 +141,47 @@
     padding:10px 14px; max-height:60vh; overflow-y:auto;
   }
   .search-row-results[hidden]{ display:none; }
+  /* ---- Program Extensions row: a third top-bar row for links out to other
+     programs the field/superintendents use day to day. Greg: "add a button
+     for Bridge connect at the top and future extensions from other programs
+     like a Microsoft Teams option or email option." Bridge is the primary
+     one (that's what field/supers mainly use); Teams and Email are shown
+     as "Soon" placeholders until/if he wants those wired up too. None of
+     the three have a real link yet — see the row's click handler below for
+     why that's fine for now. */
+  .extensions-row{
+    position:relative; background:var(--ink); border-top:1px solid #232B36;
+    padding:9px 20px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  }
+  .extensions-row-label{
+    font-family:var(--sans); font-weight:700; font-size:11px; letter-spacing:.06em;
+    text-transform:uppercase; color:#8993A0; margin-right:2px;
+  }
+  .ext-btn-wrap{ position:relative; display:inline-block; }
+  .ext-btn{
+    border:1px solid #384250; background:transparent; color:#E7E5DF; padding:7px 12px;
+    border-radius:8px; font-family:var(--sans); font-weight:600; font-size:12.5px; cursor:pointer;
+    display:inline-flex; align-items:center; gap:6px;
+  }
+  .ext-btn:hover{ border-color:var(--steel-dim); }
+  .ext-btn-primary{ border-color:var(--steel-dim); }
+  .ext-btn-primary:hover{ border-color:var(--steel); background:rgba(75,156,211,0.10); }
+  .ext-btn-soon{ opacity:.8; }
+  .ext-soon-badge{
+    background:#384250; color:#C7CDD6; font-size:9.5px; font-weight:700; letter-spacing:.04em;
+    text-transform:uppercase; padding:2px 6px; border-radius:99px; margin-left:2px;
+  }
+  .ext-dropdown{
+    position:absolute; top:calc(100% + 6px); z-index:60;
+    width:270px; max-width:min(85vw,270px);
+    background:var(--card); color:var(--ink); border:1.5px solid var(--line-strong);
+    border-radius:var(--radius); box-shadow:0 12px 32px rgba(0,0,0,.28); padding:14px;
+    font-family:var(--sans); font-size:13px; line-height:1.45;
+  }
+  .ext-dropdown[hidden]{ display:none; }
+  .ext-dropdown h4{ margin:0 0 6px; font-family:var(--disp); font-size:14.5px; }
+  .ext-dropdown p{ margin:0 0 12px; color:var(--text-muted); }
+
   .home-btn{
     border:1px solid #384250; background:transparent; color:#E7E5DF; padding:8px 12px;
     border-radius:8px; font-family:var(--sans); font-weight:600; font-size:12.5px; cursor:pointer;
@@ -743,6 +784,28 @@
   <div class="search-row-results" id="topsearch-results-wrap" hidden>
     <div id="topsearch-results"></div>
   </div>
+</div>
+<div class="extensions-row" id="extensions-row">
+  <span class="extensions-row-label">Program Extensions</span>
+  <div class="ext-btn-wrap">
+    <button class="ext-btn ext-btn-primary" onclick="toggleExtensionInfo('bridge', this)" title="Bridge — the app your field crews and superintendents mainly use">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 15l6-6"/><path d="M13 5.5l1-1a3.5 3.5 0 0 1 5 5l-1 1"/><path d="M11 18.5l-1 1a3.5 3.5 0 0 1-5-5l1-1"/></svg>
+      Bridge Connect
+    </button>
+  </div>
+  <div class="ext-btn-wrap">
+    <button class="ext-btn ext-btn-soon" onclick="toggleExtensionInfo('teams', this)" title="Microsoft Teams — coming soon">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-4 4v-4H6a2 2 0 0 1-2-2V6Z"/></svg>
+      Microsoft Teams<span class="ext-soon-badge">Soon</span>
+    </button>
+  </div>
+  <div class="ext-btn-wrap">
+    <button class="ext-btn ext-btn-soon" onclick="toggleExtensionInfo('email', this)" title="Email — coming soon">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z"/><path d="m3.5 7 8.5 6 8.5-6"/></svg>
+      Email<span class="ext-soon-badge">Soon</span>
+    </button>
+  </div>
+  <div class="ext-dropdown" id="ext-dropdown" hidden></div>
 </div>
 <div class="preview-banner" id="preview-banner" hidden>
   <span id="preview-banner-text"></span>
@@ -10659,6 +10722,53 @@ function shiftSuperSchedMonth(delta){
 }
 
 function teamDropdownEscHandler(e){ if(e.key==='Escape') closeTeamDropdown(); }
+
+/* ---- Program Extensions row: Bridge Connect + future Teams/Email buttons.
+   None of these are wired to a real link yet (Bridge's URL, and whether
+   Teams/Email should become functional, are still open — see the
+   companion project doc), so clicking one opens a small anchored info
+   panel rather than doing nothing silently. Deliberately NOT a native
+   alert()/confirm()/prompt() — a real bug in the Schedule Excel importer
+   proved those can hang the whole page, and they're worse UX besides.
+   Same anchored-panel + backdrop + Escape pattern as the Team and
+   Notifications dropdowns above, just with its own element ids. */
+const EXT_INFO = {
+  bridge: { title: 'Bridge Connect', body: "Not linked yet — this button is ready to go the moment there's a Bridge link to point it at. Ask your App Manager if you'd like it wired up." },
+  teams: { title: 'Microsoft Teams', body: "Coming soon — a Teams connection isn't wired up yet." },
+  email: { title: 'Email', body: "Coming soon — an email connection isn't wired up yet." },
+};
+function toggleExtensionInfo(key, btn){
+  const dd = document.getElementById('ext-dropdown');
+  if(!dd) return;
+  if(!dd.hidden && dd.dataset.openFor===key){ closeExtensionInfo(); return; }
+  openExtensionInfo(key, btn);
+}
+function openExtensionInfo(key, btn){
+  const dd = document.getElementById('ext-dropdown');
+  const info = EXT_INFO[key];
+  if(!dd || !info) return;
+  dd.dataset.openFor = key;
+  dd.innerHTML = `<h4>${esc(info.title)}</h4><p>${esc(info.body)}</p><button class="btn sm secondary" onclick="closeExtensionInfo()">Got it</button>`;
+  const wrap = btn.closest('.ext-btn-wrap');
+  if(wrap) dd.style.left = wrap.offsetLeft + 'px';
+  dd.hidden = false;
+  if(!document.getElementById('ext-dropdown-backdrop')){
+    const backdrop = document.createElement('div');
+    backdrop.id = 'ext-dropdown-backdrop';
+    backdrop.className = 'team-dropdown-backdrop';
+    backdrop.onclick = closeExtensionInfo;
+    document.body.appendChild(backdrop);
+  }
+  document.addEventListener('keydown', extDropdownEscHandler);
+}
+function closeExtensionInfo(){
+  const dd = document.getElementById('ext-dropdown');
+  if(dd){ dd.hidden = true; delete dd.dataset.openFor; }
+  const backdrop = document.getElementById('ext-dropdown-backdrop');
+  if(backdrop) backdrop.remove();
+  document.removeEventListener('keydown', extDropdownEscHandler);
+}
+function extDropdownEscHandler(e){ if(e.key==='Escape') closeExtensionInfo(); }
 
 /* ---- Team dropdown: anchored under the top-bar "Team" button instead of
    sitting inline on the home screen. Content (role tiers + add-member form)
