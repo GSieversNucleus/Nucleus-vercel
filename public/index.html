@@ -439,6 +439,7 @@
     display:flex; flex-direction:column; align-items:center; gap:6px;
   }
   .photo-drop:hover{ border-color:var(--steel); }
+  .photo-drop.drag-over{ border-color:var(--steel); background:rgba(75,156,211,0.12); }
   .photo-drop .icon{ font-size:20px; }
   .photo-preview{ max-width:100%; max-height:180px; border-radius:8px; margin-top:10px; display:none; }
 
@@ -2113,6 +2114,7 @@ function applyOp(op, s){
     }
     case 'deleteInvoice': s.invoices = s.invoices.filter(x=>x.id!==op.invId); break;
     case 'addTask': s.schedule.push(op.entry); break;
+    case 'addTasks': s.schedule.push(...op.entries); break;
     case 'updateTask': {
       const t = s.schedule.find(x=>x.id===op.id);
       if(t) Object.assign(t, op.patch);
@@ -5679,6 +5681,7 @@ function renderSchedule(job, tasks, issues, ganttLogs, procurement, scheduleUpda
         <span style="align-self:center; font-family:var(--mono); font-size:12.5px; min-width:110px; text-align:center;">${monthLabel(month)}</span>
         <button class="btn sm secondary" onclick="shiftScheduleMonth(1)">${icon('arrowRight')}</button>
         <button class="btn sm safety" ${disabledAttr()} onclick="openModal('task')">${icon('plus')} Add task</button>
+        <button class="btn sm secondary" ${disabledAttr()} onclick="openScheduleImportModal()">${icon('fileUpload')} Import from Excel</button>
       </div>
     </div>
     <div class="issue-meta" style="margin-bottom:6px;">Drag a task on the calendar to reschedule it — its manpower and duration move with it. Tap a purple material chip to jump to Procurement, or a teal GC chip to jump to the coordination log below.</div>
@@ -7640,6 +7643,10 @@ function openModal(type){
   if(type==='spec'){
     document.getElementById('spec-doc-input').addEventListener('change', (e)=>handleAnyFileSelect(e,'spec-doc-list'));
   }
+  if(type==='schedule-import' && !scheduleImportState){
+    const input = document.getElementById('sched-import-input');
+    if(input) input.addEventListener('change', handleScheduleImportFile);
+  }
   if(type==='invoice'){
     document.getElementById('inv-doc-input').addEventListener('change', (e)=>handlePdfSelect(e,'inv-doc-list'));
   }
@@ -8172,6 +8179,57 @@ function modalHTML(type){
       <button class="btn safety" onclick="submitLog()">Add entry</button></div>
     </div>`;
   }
+  if(type==='schedule-import'){
+    if(!scheduleImportState){
+      return `<div class="modal">
+        <h3>Import schedule from Excel</h3><p class="sub">${ui.jobId} — upload a schedule workbook (.xlsx/.xls/.xlsm) exported from the GC's schedule or your own tracking sheet.</p>
+        <div class="field"><label>Schedule workbook</label>
+          <div class="photo-drop" onclick="document.getElementById('sched-import-input').click()">${icon('fileUpload')}Upload or drag &amp; drop a spreadsheet</div>
+          <input type="file" id="sched-import-input" accept=".xlsx,.xls,.xlsm" style="display:none;">
+        </div>
+        <div class="issue-meta">Next you'll match each column to a Nucleus field and preview the result — nothing is added to the job until you confirm on that screen.</div>
+        <div class="err" id="f-err"></div>
+        <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Cancel</button></div>
+      </div>`;
+    }
+    const preview = computeScheduleImportPreview();
+    const validCount = preview.filter(r=>r.valid).length;
+    const previewRowsHtml = preview.slice(0,8).map(r=>`<tr>
+      <td data-label="Task name">${r.name ? esc(r.name) : '<span class="issue-meta">(blank — skipped)</span>'}</td>
+      <td data-label="Trade">${esc(r.trade)||'—'}</td>
+      <td data-label="Manpower">${r.manpower!=null?r.manpower:'—'}</td>
+      <td data-label="Duration">${r.duration!=null?r.duration+'d':'defaults to 1d'}</td>
+      <td data-label="Start">${r.start||'defaults to today'}</td>
+      <td data-label="Due">${r.due||'—'}</td>
+    </tr>`).join('');
+    return `<div class="modal" style="max-width:860px;">
+      <h3>Import schedule from Excel</h3>
+      <p class="sub">${ui.jobId} — "${esc(scheduleImportState.fileName)}", ${scheduleImportState.rows.length} row${scheduleImportState.rows.length===1?'':'s'} found. Match each column, then review below before importing.</p>
+      <div class="field-row three">
+        ${scheduleImportFieldSelect('name','Task name',true)}
+        ${scheduleImportFieldSelect('trade','Trade / crew',false)}
+        ${scheduleImportFieldSelect('manpower','Manpower',false)}
+      </div>
+      <div class="field-row three">
+        ${scheduleImportFieldSelect('duration','Duration (days)',false)}
+        ${scheduleImportFieldSelect('start','Start date',false)}
+        ${scheduleImportFieldSelect('due','Due date',false)}
+      </div>
+      ${scheduleImportFieldSelect('priority','Priority (optional)',false)}
+      <div class="issue-meta" style="margin:8px 0;">Rows with no Task name are skipped. A missing duration defaults to 1 day; a missing start date defaults to today.</div>
+      <div style="overflow-x:auto;"><table class="li-table">
+        <thead><tr><th>Task name</th><th>Trade</th><th>Manpower</th><th>Duration</th><th>Start</th><th>Due</th></tr></thead>
+        <tbody>${previewRowsHtml || `<tr><td colspan="6" class="issue-meta">No data rows found in this file.</td></tr>`}</tbody>
+      </table></div>
+      ${preview.length>8?`<div class="issue-meta">Showing first 8 of ${preview.length} rows.</div>`:''}
+      <div class="err" id="f-err"></div>
+      <div class="modal-actions">
+        <button class="btn secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn secondary" onclick="scheduleImportBack()">${icon('arrowLeft')} Choose a different file</button>
+        <button class="btn safety" ${validCount===0?'disabled':''} onclick="submitScheduleImport()">Import ${validCount} task${validCount===1?'':'s'}</button>
+      </div>
+    </div>`;
+  }
   return '';
 }
 
@@ -8270,6 +8328,7 @@ function recalcCO(){
 
 /* ---- PDF attachments ---- */
 let draftAttachments = [];
+let scheduleImportState = null; // { fileName, headers, rows, mapping } while the Schedule "Import from Excel" wizard is open
 function readFileAsDataURL(file){
   return new Promise((resolve)=>{
     const reader = new FileReader();
@@ -8943,6 +9002,140 @@ function submitTask(){
   commit({type:'addTask', entry});
   closeModal();
 }
+
+/* ---- Import schedule from Excel ---- */
+function openScheduleImportModal(){
+  scheduleImportState = null;
+  openModal('schedule-import');
+}
+function guessScheduleColumnMap(headers){
+  const used = new Set();
+  const pick = (regex)=>{
+    for(let i=0;i<headers.length;i++){
+      if(used.has(i)) continue;
+      if(regex.test(headers[i])){ used.add(i); return i; }
+    }
+    return '';
+  };
+  return {
+    name: pick(/task|activity|description|scope|item/i),
+    trade: pick(/trade|crew\b|sub(contractor)?\b/i),
+    manpower: pick(/manpower|crew size|headcount|#?\s*of\s*(men|workers|crew)|workers/i),
+    duration: pick(/duration|days?\b/i),
+    start: pick(/start|begin/i),
+    due: pick(/due|finish|end|complete/i),
+    priority: pick(/priority/i)
+  };
+}
+async function handleScheduleImportFile(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  if(typeof XLSX==='undefined'){
+    showErr("Couldn't load the spreadsheet reader (no internet connection?). Try again once you're back online.");
+    return;
+  }
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array', cellDates:true});
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const grid = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+    if(!grid.length){ showErr('That workbook looks empty.'); return; }
+    const headers = grid[0].map((h,i)=> String(h||'').trim() || `Column ${String.fromCharCode(65+i)}`);
+    const rows = grid.slice(1).filter(r=> r.some(c=> String(c==null?'':c).trim()!==''));
+    if(!rows.length){ showErr('Found a header row but no data rows underneath it.'); return; }
+    scheduleImportState = { fileName: file.name, headers, rows, mapping: guessScheduleColumnMap(headers) };
+    openModal('schedule-import');
+  }catch(err){
+    showErr("Couldn't read that file — make sure it's a real .xlsx/.xls/.xlsm workbook.");
+  }
+}
+function scheduleImportFieldSelect(field, label, required){
+  const headers = scheduleImportState.headers;
+  const sel = scheduleImportState.mapping[field];
+  const opts = [`<option value="">${required?'— choose a column —':'— none / skip —'}</option>`]
+    .concat(headers.map((h,i)=>`<option value="${i}" ${sel===i?'selected':''}>${esc(h)}</option>`));
+  return `<div class="field"><label>${esc(label)}${required?' *':''}</label><select onchange="updateScheduleImportMapping('${field}', this.value)">${opts.join('')}</select></div>`;
+}
+function updateScheduleImportMapping(field, value){
+  scheduleImportState.mapping[field] = value===''? '' : Number(value);
+  openModal('schedule-import');
+}
+function scheduleImportBack(){
+  scheduleImportState = null;
+  openModal('schedule-import');
+}
+function parseIntSafeLoose(v){
+  if(v==null || v==='') return null;
+  const n = Number(String(v).replace(/[^0-9.\-]/g,''));
+  return isFinite(n) ? Math.round(n) : null;
+}
+function parseExcelDateCell(v){
+  if(v==null || v==='') return '';
+  const pad = (n)=> String(n).padStart(2,'0');
+  if(v instanceof Date && !isNaN(v)){
+    return `${v.getUTCFullYear()}-${pad(v.getUTCMonth()+1)}-${pad(v.getUTCDate())}`;
+  }
+  if(typeof v==='number' && isFinite(v)){
+    const ms = Math.round((v - 25569) * 86400 * 1000);
+    const d = new Date(ms);
+    if(!isNaN(d)) return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}`;
+    return '';
+  }
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if(m){
+    let [,mo,da,yr] = m;
+    if(yr.length===2) yr = (Number(yr)<50?'20':'19')+yr;
+    return `${yr}-${pad(mo)}-${pad(da)}`;
+  }
+  const d = new Date(s);
+  if(!isNaN(d)) return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  return '';
+}
+function normalizeImportedPriority(v){
+  const s = String(v||'').trim().toLowerCase();
+  if(s.startsWith('h')) return 'High';
+  if(s.startsWith('l')) return 'Low';
+  if(s.startsWith('m')) return 'Medium';
+  return 'Medium';
+}
+function computeScheduleImportPreview(){
+  const {rows, mapping} = scheduleImportState;
+  const get = (row, field)=> mapping[field]!==''? row[mapping[field]] : '';
+  return rows.map(row=>{
+    const name = String(get(row,'name')||'').trim();
+    const trade = String(get(row,'trade')||'').trim();
+    const manpower = parseIntSafeLoose(get(row,'manpower'));
+    const duration = parseIntSafeLoose(get(row,'duration'));
+    const start = parseExcelDateCell(get(row,'start'));
+    const due = parseExcelDateCell(get(row,'due'));
+    const priorityRaw = get(row,'priority');
+    const priority = priorityRaw!==''? normalizeImportedPriority(priorityRaw) : 'Medium';
+    return { name, trade, manpower, duration, start, due, priority, valid: !!name };
+  });
+}
+function submitScheduleImport(){
+  if(!scheduleImportState) return;
+  const valid = computeScheduleImportPreview().filter(r=>r.valid);
+  if(!valid.length) return showErr('No rows matched — make sure "Task name" is mapped to a column that has data in it.');
+  const startCount = state.schedule.filter(x=>x.jobId===ui.jobId).length;
+  const entries = valid.map((r,i)=>({
+    id: `${ui.jobId}-TSK-${String(startCount+i+1).padStart(3,'0')}`, jobId: ui.jobId,
+    name: r.name, trade: r.trade||'', manpower: r.manpower||0,
+    duration: (r.duration && r.duration>=1) ? r.duration : 1,
+    originalStart: r.start||todayStr(), currentStart: r.start||todayStr(), actualStart: '',
+    status: 'Not Started', delayReason: '', linkedIssueId: '',
+    priority: r.priority||'Medium', dueDate: r.due||'',
+    notes: [], attachments: []
+  }));
+  commit({type:'addTasks', entries});
+  scheduleImportState = null;
+  closeModal();
+  alert(`Imported ${entries.length} task${entries.length===1?'':'s'} from the spreadsheet.`);
+}
+
 function submitNote(){
   const text = document.getElementById('f-text').value.trim();
   if(!text) return showErr('Enter a note.');
@@ -9518,6 +9711,51 @@ document.addEventListener('visibilitychange', () => {
   if(document.visibilityState === 'hidden') flushPendingSaveNow();
 });
 window.addEventListener('pagehide', flushPendingSaveNow);
+
+/* ===================== DRAG & DROP FOR EVERY UPLOAD ZONE =====================
+   Every upload area in the app is a `.photo-drop` div whose onclick opens the
+   file input it's paired with (`document.getElementById('some-input').click()`).
+   Rather than touch each of the 30+ upload areas individually, this reads that
+   same onclick attribute to find the paired input, then drives it exactly the
+   way a real file-picker selection would: assign the dropped files to the
+   input via a DataTransfer, then dispatch a 'change' event so every existing
+   handler (attachments, photos, Green Sheet parsing, the Excel schedule
+   importer, etc.) fires completely unchanged. */
+(function(){
+  function dropZoneInput(zone){
+    const oc = zone.getAttribute('onclick') || '';
+    const m = oc.match(/getElementById\(['"]([^'"]+)['"]\)/);
+    return m ? document.getElementById(m[1]) : null;
+  }
+  document.addEventListener('dragenter', (e)=>{
+    const zone = e.target.closest && e.target.closest('.photo-drop');
+    if(zone){ e.preventDefault(); zone.classList.add('drag-over'); }
+  });
+  document.addEventListener('dragover', (e)=>{
+    // Always preventDefault, even outside a drop zone — otherwise the browser
+    // navigates away to show the dropped file instead of doing nothing.
+    e.preventDefault();
+  });
+  document.addEventListener('dragleave', (e)=>{
+    const zone = e.target.closest && e.target.closest('.photo-drop');
+    if(zone && (!e.relatedTarget || !zone.contains(e.relatedTarget))) zone.classList.remove('drag-over');
+  });
+  document.addEventListener('drop', (e)=>{
+    e.preventDefault();
+    const zone = e.target.closest && e.target.closest('.photo-drop');
+    if(!zone) return;
+    zone.classList.remove('drag-over');
+    const input = dropZoneInput(zone);
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if(!input || !files || !files.length) return;
+    try{
+      const dt = new DataTransfer();
+      Array.from(files).forEach(f=>dt.items.add(f));
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', {bubbles:true}));
+    }catch(err){ /* very old browser without DataTransfer construction — click-to-upload still works */ }
+  });
+})();
 
 boot();
 
