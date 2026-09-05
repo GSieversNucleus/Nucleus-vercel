@@ -4957,14 +4957,14 @@ function renderGreenSheetRundown(job){
     }
     const line = r.line;
     const sourceNote = `<div class="issue-meta" style="margin-top:2px;">${esc(r.doc.name)}${line.sheetName?` — ${esc(line.sheetName)}`:''}</div>`;
-    return `<tr>
+    return `<tr onclick="openGreenSheetSystemDetail('${job.id}', ${r.docIdx}, ${r.lineIdx})" style="cursor:pointer;" title="View details for this system">
       <td data-label="System #" class="idcell">${esc(line.systemNo||'—')}</td>
       <td data-label="System">${esc(line.systemName||'—')}${sourceNote}</td>
       <td data-label="Material Total">${line.materialTotal!=null?fmtMoney(line.materialTotal):'—'}</td>
       <td data-label="Shop Hours">${line.shopHours!=null?line.shopHours.toLocaleString():'—'}</td>
       <td data-label="Field Hours">${line.fieldHours!=null?line.fieldHours.toLocaleString():'—'}</td>
       <td></td>
-      <td data-label="">${editBtn}</td>
+      <td data-label="" onclick="event.stopPropagation();">${editBtn}</td>
     </tr>`;
   }).join('');
   return `
@@ -4990,6 +4990,48 @@ function openGreenSheetLineEdit(jobId, docIdx, lineIdx){
   const line = lines[lineIdx] || { sheetName:'', systemNo:'', systemName:'', materialTotal:null, shopHours:null, fieldHours:null };
   ui.gsEditRef = { jobId, docIdx, lineIdx, line };
   openModal('greensheet-line');
+}
+// Tapping a system row in the Green Sheet rundown opens this read-only detail
+// view — a bigger, single-system layout that's much easier to read on a
+// phone/tablet than the dense multi-column table row (which on narrow
+// screens already collapses into stacked data-label pairs). Built the same
+// way as the other "tap a row for detail" views in this app (RFI, CO,
+// invoice, submittal, schedule update) — a direct overlay, not openModal(),
+// so it stays viewable in read-only/View As contexts; only the Edit button
+// inside is gated on !readOnly.
+function openGreenSheetSystemDetail(jobId, docIdx, lineIdx){
+  const job = getJob(jobId);
+  const doc = job && job.contractDocs && job.contractDocs[docIdx];
+  if(!doc) return;
+  const lines = greenSheetDocLines(doc);
+  const line = lines[lineIdx];
+  if(!line) return;
+  closeModal();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = (e)=>{ if(e.target===overlay) closeModal(); };
+  overlay.innerHTML = greenSheetSystemDetailHTML(job, doc, docIdx, line, lineIdx);
+  document.body.appendChild(overlay);
+}
+function greenSheetSystemDetailHTML(job, doc, docIdx, line, lineIdx){
+  const row = (label, value, big)=>`
+      <div style="display:flex; justify-content:space-between; align-items:baseline; gap:16px; border-bottom:1px solid var(--line); padding-bottom:10px;">
+        <span style="color:var(--text-muted); font-size:13px;">${label}</span>
+        <span style="${big?'font-family:var(--disp); font-weight:800; font-size:22px;':'font-weight:700; font-size:16px;'}">${value}</span>
+      </div>`;
+  return `<div class="modal" style="max-width:480px;">
+    <h3>${esc(line.systemName || (line.systemNo?`System ${line.systemNo}`:'System detail'))}</h3>
+    <p class="sub">${esc(doc.name)}${line.sheetName?` — ${esc(line.sheetName)}`:''}</p>
+    <div style="display:flex; flex-direction:column; gap:14px; margin:18px 0;">
+      ${row('System #', esc(line.systemNo||'—'))}
+      ${row('System', esc(line.systemName||'—'))}
+      ${row('Material Total', line.materialTotal!=null?fmtMoney(line.materialTotal):'—', true)}
+      ${row('Shop Hours', line.shopHours!=null?line.shopHours.toLocaleString():'—')}
+      ${row('Field Hours', line.fieldHours!=null?line.fieldHours.toLocaleString():'—')}
+    </div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Close</button>
+    ${!readOnly ? `<button class="btn safety" onclick="closeModal(); openGreenSheetLineEdit('${job.id}', ${docIdx}, ${lineIdx});">${icon('edit')} Edit</button>` : ''}</div>
+  </div>`;
 }
 function submitGreenSheetLine(){
   const ref = ui.gsEditRef;
