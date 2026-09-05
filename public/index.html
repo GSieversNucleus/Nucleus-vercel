@@ -9133,7 +9133,10 @@ function submitScheduleImport(){
   commit({type:'addTasks', entries});
   scheduleImportState = null;
   closeModal();
-  alert(`Imported ${entries.length} task${entries.length===1?'':'s'} from the spreadsheet.`);
+  // No alert() here on purpose — a blocking native dialog is bad UX (and, in
+  // at least one automated browser context, froze the page entirely). The
+  // imported tasks already appear immediately in the calendar and Kanban
+  // board the moment the modal closes, which is confirmation enough.
 }
 
 function submitNote(){
