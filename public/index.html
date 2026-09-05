@@ -1239,7 +1239,7 @@ const FOREMAN_ALLOWED_TABS = ['fieldkit','scope','specs','contacts','rfis','requ
 // Project Manager identities — including when no identity is picked at all, since this
 // is the one place actual budget figures live outside Costs/Hours. Same honesty caveat
 // as everywhere else in Team & roles: this is a device-level filter, not real security.
-const CONTRACT_TAB_ALLOWED_ROLES = ['Operations Manager','Project Manager'];
+const CONTRACT_TAB_ALLOWED_ROLES = ['Operations Manager','Project Manager','App Manager'];
 // Every tab a per-person override can target — JOB_TAB_ORDER plus 'alllogs'
 // (the "Log & Notes" job-header button, gated through this exact same
 // tabAllowedForCurrentUser() machinery even though it isn't one of the
@@ -4955,7 +4955,7 @@ function renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes){
   }).join('');
   return `
     <div class="panel-head"><h3>Budget and Costs</h3></div>
-    <div class="issue-meta" style="margin-bottom:14px;">Visible only to Operations Manager and Project Manager identities. Upload the Green Sheet estimate here for reference, key in the budget for each system/scope from it — link a Green Sheet code to a row to see live spend pulled from the Invoice log and quotes received against it. The signed contract itself lives on the separate Contract tab.</div>
+    <div class="issue-meta" style="margin-bottom:14px;">Visible only to Operations Manager, Project Manager, and App Manager identities. Upload the Green Sheet estimate here for reference, key in the budget for each system/scope from it — link a Green Sheet code to a row to see live spend pulled from the Invoice log and quotes received against it. The signed contract itself lives on the separate Contract tab.</div>
 
     <div class="section-title">Green Sheet documents</div>
     ${contractDocsListHTML(job, 'Green Sheet')}
@@ -5006,7 +5006,7 @@ function renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes){
 function renderContract(job){
   return `
     <div class="panel-head"><h3>Contract</h3></div>
-    <div class="issue-meta" style="margin-bottom:14px;">Visible only to Operations Manager and Project Manager identities. Upload the signed contract here for reference. Budget-by-system, Green Sheet documents, and Quotes moved to the Budget and Costs tab.</div>
+    <div class="issue-meta" style="margin-bottom:14px;">Visible only to Operations Manager, Project Manager, and App Manager identities. Upload the signed contract here for reference. Budget-by-system, Green Sheet documents, and Quotes moved to the Budget and Costs tab.</div>
 
     <div class="section-title">Contract documents</div>
     ${contractDocsListHTML(job, 'Contract')}
