@@ -1263,7 +1263,7 @@ const OVERRIDABLE_TABS = [
   {key:'hours', label:'Hours'},
   {key:'requests', label:'PM Requests For Field'},
   {key:'engineering', label:'Engineering'},
-  {key:'schedule', label:'Schedule'},
+  {key:'schedule', label:'Field Schedule'},
   {key:'procurement', label:'Procurement'},
   {key:'safety', label:'Safety Docs'},
   {key:'welding', label:'Welding Procedures'},
@@ -1456,7 +1456,7 @@ function searchApp(query){
       .map(sp=>({jobId:sp.jobId, tab:'specs', title:`${sp.section||''} ${sp.title||''}`.trim(), snippet:jobLabel(sp.jobId)}))
     .concat(state.submittals.filter(su=>inScope(su.jobId) && matches(su.id,su.description,su.to,su.re,su.attn,su.remarks))
       .map(su=>({jobId:su.jobId, tab:'specs', title:`${su.id} — ${su.description}`, snippet:jobLabel(su.jobId)}))));
-  pushGroup('Schedule', state.schedule.filter(t=>inScope(t.jobId) && matches(t.id,t.name,t.trade))
+  pushGroup('Field Schedule', state.schedule.filter(t=>inScope(t.jobId) && matches(t.id,t.name,t.trade))
     .map(t=>({jobId:t.jobId, tab:'schedule', title:`${t.id} — ${t.name}`, snippet:jobLabel(t.jobId)+(t.trade?` · ${t.trade}`:'')})));
   pushGroup('Procurement', state.procurement.filter(p=>inScope(p.jobId) && matches(p.id,p.item,p.vendor,p.notes))
     .map(p=>({jobId:p.jobId, tab:'procurement', title:`${p.id} — ${p.item}`, snippet:jobLabel(p.jobId)+(p.vendor?` · ${p.vendor}`:'')})));
@@ -3934,7 +3934,7 @@ function renderCalendarLegend(jobsForLegend, opts){
     <span class="legend-item"><span class="legend-swatch" style="background:var(--amber-dim); border:1.5px solid var(--amber-dark);"></span>In progress</span>
     <span class="legend-item"><span class="legend-swatch" style="background:var(--good-dim); border:1.5px solid var(--good-dark);"></span>Complete</span>
     <span class="legend-item"><span class="legend-swatch" style="background:var(--safety-dim); border:1.5px solid var(--safety-dark);"></span>Delayed${opts.showRequest?' / open request':''}</span>
-    <span class="legend-item"><span class="legend-swatch" style="background:var(--proc-dim); border:1.5px solid var(--proc-dark);"></span>Procurement — material needed</span>
+    ${opts.showProcurement!==false?`<span class="legend-item"><span class="legend-swatch" style="background:var(--proc-dim); border:1.5px solid var(--proc-dark);"></span>Procurement — material needed</span>`:''}
     ${opts.showGc?`<span class="legend-item"><span class="legend-swatch" style="background:var(--gc-dim); border:1.5px solid var(--gc-dark);"></span>GC coordination log</span>`:''}`;
   return `<div class="cal-legend">
     ${jobItems ? `<div class="legend-row">${jobItems}</div>` : ''}
@@ -4172,7 +4172,7 @@ function renderJob(){
         {key:'hours', label:'Hours'},
         {key:'requests', label:'PM Requests For Field', count:openReq},
         {key:'engineering', label:'Engineering', count:openEng},
-        {key:'schedule', label:'Schedule', count:delayedTasks},
+        {key:'schedule', label:'Field Schedule', count:delayedTasks},
         {key:'procurement', label:'Procurement', count:openProc},
         {key:'safety', label:'Safety Docs'},
         {key:'welding', label:'Welding Procedures'},
@@ -5764,20 +5764,18 @@ function schedJobCounts(jobId){
   const tasks = state.schedule.filter(t=>t.jobId===jobId);
   const counts = {};
   TASK_STATUSES.forEach(st=>{ counts[st] = tasks.filter(t=>t.status===st).length; });
-  const openProc = state.procurement.filter(p=>p.jobId===jobId && p.status!=='Delivered').length;
-  return {counts, openProc};
+  return {counts};
 }
 function schedJobOverviewCardHTML(j, activeJobId){
-  const {counts, openProc} = schedJobCounts(j.id);
+  const {counts} = schedJobCounts(j.id);
   const total = TASK_STATUSES.reduce((n,st)=>n+counts[st],0);
   return `
     <div class="log-entry sched-job-card${j.id===activeJobId?' sched-job-card-active':''}" style="cursor:pointer; border-left:4px solid ${jobColor(j.id)};" onclick="openJob('${j.id}','schedule')">
       <div style="font-weight:700; font-size:13.5px;">${j.id} <span style="font-weight:500; color:var(--text-muted);">${j.name?'— '+esc(j.name):''}</span></div>
       <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
         ${TASK_STATUSES.map(st=>`<span class="eng-count-chip ${taskCountChipClass(st)}">${esc(st)} ${counts[st]}</span>`).join('')}
-        <span class="eng-count-chip proc">${icon('truck')}${openProc} material${openProc===1?'':'s'}</span>
       </div>
-      ${total===0 && openProc===0 ? `<div class="issue-meta" style="margin-top:6px;">No schedule tasks or material orders yet.</div>` : ''}
+      ${total===0 ? `<div class="issue-meta" style="margin-top:6px;">No schedule tasks yet.</div>` : ''}
     </div>`;
 }
 function setSchedFilterJob(jobId){
@@ -5792,11 +5790,6 @@ function renderScheduleLookAhead(filterJobId){
     if(filterJobId && t.jobId!==filterJobId) return;
     items.push({type:'Task', jobId:t.jobId, id:t.id, label:t.name, date:t.currentStart, status:t.status});
   });
-  state.procurement.forEach(p=>{
-    if(p.status==='Delivered' || !isJobVisible(p.jobId)) return;
-    if(filterJobId && p.jobId!==filterJobId) return;
-    items.push({type:'Material', jobId:p.jobId, id:p.id, label:p.item, date:p.neededBy, status:p.status});
-  });
   items.sort((a,b)=>(a.date||'9999-99-99').localeCompare(b.date||'9999-99-99'));
   if(items.length===0) return `<div class="issue-meta" style="padding:6px 0;">Nothing outstanding${filterJobId?' for this job':''}.</div>`;
   return items.map(it=>{
@@ -5809,8 +5802,7 @@ function renderScheduleLookAhead(filterJobId){
       else if(days<=7){ dueLabel = `${days}d out`; dueCls='warn'; }
       else { dueLabel = `${days}d out`; dueCls='ok'; }
     }
-    const tab = it.type==='Material' ? 'procurement' : 'schedule';
-    return `<div class="log-entry" style="cursor:pointer; border-left:4px solid ${jobColor(it.jobId)};" onclick="openJob('${it.jobId}','${tab}')">
+    return `<div class="log-entry" style="cursor:pointer; border-left:4px solid ${jobColor(it.jobId)};" onclick="openJob('${it.jobId}','schedule')">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
         <div style="flex:1; min-width:0;">
           <div class="issue-meta">${job?job.id:it.jobId}${job&&job.name?' — '+esc(job.name):''} · ${it.type}</div>
@@ -5828,11 +5820,11 @@ function renderScheduleOverview(activeJobId){
   const jobs = visibleJobs().slice().sort((a,b)=>a.id.localeCompare(b.id));
   const filterJobId = ui.schedFilterJobId || '';
   return `
-    <div class="panel-head"><h3>Schedule — all jobs overview</h3></div>
-    <div class="issue-meta" style="margin-bottom:12px;">Every job's task progress and open material orders at a glance — tap a job card to jump into it.</div>
+    <div class="panel-head"><h3>Field Schedule — all jobs overview</h3></div>
+    <div class="issue-meta" style="margin-bottom:12px;">Every job's task progress at a glance — tap a job card to jump into it.</div>
     <div class="job-grid">${jobs.map(j=>schedJobOverviewCardHTML(j, activeJobId)).join('')}</div>
     <div class="panel-head" style="margin-top:22px;">
-      <h3>Schedule look ahead</h3>
+      <h3>Field Schedule look ahead</h3>
       <div class="field" style="margin:0; min-width:200px;">
         <select id="sched-overview-filter" onchange="setSchedFilterJob(this.value)">
           <option value="">All jobs</option>
@@ -5840,7 +5832,7 @@ function renderScheduleOverview(activeJobId){
         </select>
       </div>
     </div>
-    <div class="issue-meta" style="margin-bottom:8px;">Every open task and material order due across ${filterJobId?'that job':'every job'} — schedule and procurement combined, soonest date first.</div>
+    <div class="issue-meta" style="margin-bottom:8px;">Every open task due across ${filterJobId?'that job':'every job'}, soonest date first.</div>
     ${renderScheduleLookAhead(filterJobId)}`;
 }
 function renderTaskKanban(job, tasks){
@@ -5869,20 +5861,17 @@ function renderSchedule(job, tasks, issues, ganttLogs, procurement, scheduleUpda
   const cellsHtml = cells.map(dateStr=>{
     if(!dateStr) return `<div class="cal-cell empty-cell"></div>`;
     const dayTasks = tasks.filter(t=> t.currentStart && dateStr >= t.currentStart && dateStr <= addDaysStr(t.currentStart, Math.max(1,t.duration||1)-1));
-    const dayProc = procurement.filter(p=> p.status!=='Delivered' && p.neededBy===dateStr);
     const dayGc = gcCommLog.filter(g=> g.date===dateStr);
     const dnum = Number(dateStr.slice(8,10));
-    const procChips = dayProc.map(p=>`<div class="cal-chip click-only proc-chip" style="border-left:4px solid ${jobColor(job.id)};" onclick="setTab('procurement')" title="${esc(p.item)} — needed ${dateStr}${p.vendor?' · '+esc(p.vendor):''}">${icon('truck')}${esc(p.item)}</div>`).join('');
     const gcChips = dayGc.map(g=>`<div class="cal-chip click-only gc-chip" style="border-left:4px solid ${jobColor(job.id)};" onclick="document.getElementById('gc-comm-log').scrollIntoView({behavior:'smooth'});" title="${esc(g.category||'General')} — ${esc((g.text||'').slice(0,80))}">${icon('helpCircle')}${esc(g.category||'GC')}</div>`).join('');
     return `<div class="cal-cell${dateStr===today?' cal-today':''}" ondragover="event.preventDefault()" ondrop="onCalendarDrop(event,'${dateStr}')">
       <div class="cal-daynum">${dnum}</div>
       ${dayTasks.map(t=>`<div class="cal-chip status-${(t.status||'').replace(/\s+/g,'-').toLowerCase()}" style="border-left:4px solid ${jobColor(job.id)};" draggable="${readOnly?'false':'true'}" ondragstart="onChipDragStart(event,'${t.id}','${dateStr}')" onclick="openTaskDetail('${t.id}')" title="${esc(t.name)} — ${t.manpower||0} crew, ${t.duration||0}d">${esc(t.name)}</div>`).join('')}
-      ${procChips}
       ${gcChips}
     </div>`;
   }).join('');
   return `
-    <div class="panel-head"><h3>Work plan &amp; logistics</h3>
+    <div class="panel-head"><h3>Field Schedule</h3>
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
         <span style="align-self:center;">${scheduleStatusBadgeHTML(jobDelay)}</span>
         <button class="btn sm secondary" onclick="shiftScheduleMonth(-1)">${icon('arrowLeft')}</button>
@@ -5892,9 +5881,9 @@ function renderSchedule(job, tasks, issues, ganttLogs, procurement, scheduleUpda
         <button class="btn sm secondary" ${disabledAttr()} onclick="openScheduleImportModal()">${icon('fileUpload')} Import from Excel</button>
       </div>
     </div>
-    <div class="issue-meta" style="margin-bottom:6px;">Drag a task on the calendar to reschedule it — its manpower and duration move with it. Tap a purple material chip to jump to Procurement, or a teal GC chip to jump to the coordination log below.</div>
+    <div class="issue-meta" style="margin-bottom:6px;">Drag a task on the calendar to reschedule it — its manpower and duration move with it. Tap a teal GC chip to jump to the coordination log below. Material procurement now lives entirely on its own Procurement tab.</div>
     <div class="cal-grid">${dayHeaders}${cellsHtml}</div>
-    ${renderCalendarLegend([job], {showRequest:false, showGc:true})}
+    ${renderCalendarLegend([job], {showRequest:false, showGc:true, showProcurement:false})}
     <div class="section-title" style="margin-top:22px;">Task list</div>
     <div class="issue-meta" style="margin-bottom:8px;">Drag a card between columns to update its status.</div>
     ${tasks.length===0 ? emptyBlock('calendarEvent','No schedule tasks yet — add tasks from the GC gantt schedule to start tracking manpower and dates.') : renderTaskKanban(job, tasks)}
