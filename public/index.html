@@ -855,7 +855,8 @@ const ICON_PATHS = {
   lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><path d="M12 15v2.5"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
-  sliders: '<path d="M4 6h4M12 6h8M4 12h8M16 12h4M4 18h10M18 18h2"/><circle cx="8.2" cy="6" r="2.1"/><circle cx="14.2" cy="12" r="2.1"/><circle cx="12.2" cy="18" r="2.1"/>'
+  sliders: '<path d="M4 6h4M12 6h8M4 12h8M16 12h4M4 18h10M18 18h2"/><circle cx="8.2" cy="6" r="2.1"/><circle cx="14.2" cy="12" r="2.1"/><circle cx="12.2" cy="18" r="2.1"/>',
+  package: '<path d="M21 8.5v7a1 1 0 0 1-.5.87l-8 4.5a1 1 0 0 1-1 0l-8-4.5A1 1 0 0 1 3 15.5v-7a1 1 0 0 1 .5-.87l8-4.5a1 1 0 0 1 1 0l8 4.5a1 1 0 0 1 .5.87Z"/><path d="M3.3 8.2 12 13l8.7-4.8M12 13v8.3"/>'
 };
 function icon(name, cls){
   return `<svg class="icon ${cls||''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name]||''}</svg>`;
@@ -1223,7 +1224,7 @@ function submitEditTeamMember(id){
 // 'meetingminutes' (Feature H) sits right after 'notes' — same coordination
 // tool, no financial data, and (per the FOREMAN_ALLOWED_TABS comment below)
 // visible to the exact same roles Notes already is, Foreman included.
-const JOB_TAB_ORDER = ['fieldkit','overview','scope','specs','elevations','contacts','rfis','costs','budgetcosts','contract','hours','requests','engineering','schedule','procurement','safety','welding','watertest','notes','meetingminutes','aar'];
+const JOB_TAB_ORDER = ['fieldkit','overview','scope','specs','submittals','elevations','contacts','rfis','costs','budgetcosts','contract','hours','requests','engineering','schedule','procurement','safety','welding','watertest','notes','meetingminutes','aar'];
 // 'elevations' and 'costs' were REMOVED from this list per Greg's request:
 // "Take away costs and elevations on the side bar for Foreman. They should
 // have everything in their Field Tool Kit section." A Foreman no longer gets
@@ -1237,7 +1238,7 @@ const JOB_TAB_ORDER = ['fieldkit','overview','scope','specs','elevations','conta
 // real standalone tab via that person's tabOverrides (see "Per-person tab
 // overrides" below) — removing them from this default list only changes what
 // a Foreman sees with no override set.
-const FOREMAN_ALLOWED_TABS = ['fieldkit','scope','specs','contacts','rfis','requests','schedule','procurement','safety','welding','watertest','notes','meetingminutes','aar','alllogs'];
+const FOREMAN_ALLOWED_TABS = ['fieldkit','scope','specs','submittals','contacts','rfis','requests','schedule','procurement','safety','welding','watertest','notes','meetingminutes','aar','alllogs'];
 // "Contract" (contract + Green Sheet documents, and the budget-by-system table keyed
 // in from the Green Sheet) is the one tab that works the other way round from the
 // Foreman restriction above: it's hidden from everyone EXCEPT Operations Manager and
@@ -1254,6 +1255,7 @@ const OVERRIDABLE_TABS = [
   {key:'overview', label:'Overview'},
   {key:'scope', label:'Scope'},
   {key:'specs', label:'Specs'},
+  {key:'submittals', label:'Submittals'},
   {key:'elevations', label:'Elevations'},
   {key:'contacts', label:'Contacts'},
   {key:'rfis', label:'RFIs'},
@@ -2149,6 +2151,15 @@ function applyOp(op, s){
     }
     case 'addSubmittal': s.submittals.push(op.entry); break;
     case 'addSubmittalsBulk': s.submittals.push(...op.entries); break;
+    // Greg: "give an option to delete certain submittals that do not need to
+    // be submitted." A deleted submittal that happened to be part of a total
+    // package submittal isn't specially cleaned up — packageCardHTML/
+    // submittalDetailHTML just look each packageItemIds entry up and skip it
+    // if it's gone, same as anywhere else in the app that references another
+    // record loosely by id.
+    case 'deleteSubmittal':
+      s.submittals = s.submittals.filter(x=>x.id!==op.subId);
+      break;
     case 'updateSubmittal': {
       const su = s.submittals.find(x=>x.id===op.subId);
       if(su) Object.assign(su, op.patch);
@@ -4157,6 +4168,7 @@ function renderJob(){
   if(ui.tab==='overview') body = renderOverview(job, rfis, cos, issues, logs, hoursEntries, tasks, procurement);
   if(ui.tab==='scope') body = renderScope(scopeItems, materials);
   if(ui.tab==='specs') body = renderSpecs(job, specs, submittals);
+  if(ui.tab==='submittals') body = renderSubmittalsPage(job, specs, submittals);
   if(ui.tab==='elevations') body = renderElevations(elevations);
   if(ui.tab==='contacts') body = renderContacts(contacts);
   if(ui.tab==='rfis') body = renderRfis(rfis);
@@ -4193,7 +4205,8 @@ function renderJob(){
         {key:'fieldkit', label:'Field Tool Kit'},
         {key:'overview', label:'Overview'},
         {key:'scope', label:'Scope'},
-        {key:'specs', label:'Specs', count:openSub},
+        {key:'specs', label:'Specs'},
+        {key:'submittals', label:'Submittals', count:openSub},
         {key:'elevations', label:'Elevations', count:incompleteElev},
         {key:'contacts', label:'Contacts'},
         {key:'rfis', label:'RFIs', count:openRfi},
@@ -4349,6 +4362,15 @@ function nextSubmittalNumber(jobId){
 function nextSubmittalId(jobId, specId){
   const n = nextSubmittalNumber(jobId);
   return `${jobId}-${specSectionLabel(specId)}-${String(n).padStart(3,'0')}`;
+}
+// Total package submittals (see renderSubmittalsPage/packageCardHTML) span
+// every spec they bundle rather than belonging to one, so they get a fixed
+// "PKG" section label instead of a real spec's — same continuous per-job
+// counter as everything else, so a package's number still never collides
+// with a regular submittal's.
+function nextPackageSubmittalId(jobId){
+  const n = nextSubmittalNumber(jobId);
+  return `${jobId}-PKG-${String(n).padStart(3,'0')}`;
 }
 // Shared by generateSubmittalChecklist (fixed generic list) and
 // scanSpecForSubmittals (list read off the spec's own uploaded PDF) — both just
@@ -4530,9 +4552,33 @@ function submittalPurposeGridHTML(selected, bidsDueOn, keyPrefix){
 function readCheckGroup(cls){
   return Array.from(document.querySelectorAll('.'+cls+':checked')).map(el=>el.value);
 }
-function setSpecsView(v){ ui.specsView = v; render(); }
+/* ---- Submittals (own tab) ----
+   Greg: "Add a separate Submittal Section as its own page and what is loaded
+   in the specs connects to that section. Also give an option to delete
+   certain submittals that do not need to be submitted. Also give an option
+   to provide a total package submittal that has all submittal items under
+   one umbrella of a submittal. Maybe add that at the top."
+
+   This used to be a "Submittal log" sub-tab buried inside Specs; it's now
+   its own top-level job tab (see JOB_TAB_ORDER/OVERRIDABLE_TABS and the tab
+   dispatcher in renderJob). Specs still feed it exactly as before — a spec
+   card's Scan for submittals / Generate checklist / Add submittal buttons
+   write into the same state.submittals array this page reads — so nothing
+   about how a submittal gets CREATED changed, only where it's reviewed,
+   packaged, and deleted from. Each spec card links straight back to just
+   its own submittals here (see viewSubmittalsForSpec) so the connection
+   Greg asked for stays one click in either direction.
+*/
+function viewSubmittalsForSpec(specId){
+  ui.submittalsSpecFilter = specId;
+  setTab('submittals');
+}
+function setSubmittalsSpecFilter(specId){
+  ui.submittalsSpecFilter = specId;
+  render();
+}
 function renderSubmittalLog(job, specs, submittals){
-  if(submittals.length===0) return emptyBlock('fileText','No submittals logged yet — add one from a spec, then switch back to Submittal log.');
+  if(submittals.length===0) return emptyBlock('fileText','No submittals logged yet — add one from a spec on the Specs tab, or scan a spec\'s PDF.');
   const specById = new Map(specs.map(sp=>[sp.id, sp]));
   const sorted = submittals.slice().sort((a,b)=>(a.dateSubmitted||'').localeCompare(b.dateSubmitted||'') || a.id.localeCompare(b.id));
   const updated = sorted.reduce((max,su)=>(su.dateSubmitted && su.dateSubmitted>max)?su.dateSubmitted:max, sorted[0].dateSubmitted||todayStr());
@@ -4549,6 +4595,7 @@ function renderSubmittalLog(job, specs, submittals){
       <td data-label="Status" class="center">${badge(su.status)}</td>
       <td data-label="Sent By" class="center">${su.sentBy?esc(su.sentBy):'—'}</td>
       <td data-label="Docs" class="center">${docCount?`${icon('paperclip')} ${docCount}`:'—'}</td>
+      <td data-label="" class="center no-print">${readOnly?'':`<button class="btn sm secondary" onclick="event.stopPropagation(); deleteSubmittal('${su.id}')" title="Delete this submittal">${icon('trash')}</button>`}</td>
     </tr>`;
   }).join('');
   return `
@@ -4562,7 +4609,7 @@ function renderSubmittalLog(job, specs, submittals){
       <div style="overflow-x:auto;">
       <table class="co-log-table">
         <thead><tr>
-          <th>Submittal No.</th><th>Spec Section</th><th>Description</th><th>To</th><th>Date</th><th>Status</th><th>Sent By</th><th>Docs</th>
+          <th>Submittal No.</th><th>Spec Section</th><th>Description</th><th>To</th><th>Date</th><th>Status</th><th>Sent By</th><th>Docs</th><th class="no-print"></th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -4573,24 +4620,67 @@ function renderSubmittalLog(job, specs, submittals){
       </div>
     </div>`;
 }
-function renderSpecs(job, specs, submittals){
-  const view = ui.specsView || 'cards';
-  const head = `
-    <div class="panel-head"><h3>Specifications &amp; submittals</h3><button class="btn sm safety" ${disabledAttr()} onclick="openModal('spec')">${icon('plus')} Add specification</button></div>
-    <div class="subtabs no-print">
-      <div class="subtab ${view==='cards'?'active':''}" onclick="setSpecsView('cards')">Specs</div>
-      <div class="subtab ${view==='log'?'active':''}" onclick="setSpecsView('log')">Submittal log</div>
+// A "total package submittal" is a normal submittal/transmittal in every
+// respect (same to/date/send-method/line-items form as any other) but
+// stands for "send this whole batch as one submission" — Greg confirmed he
+// wants to hand-pick which logged items go in via checkboxes rather than
+// have it auto-grab everything (see the "submittal-package" modal below), so
+// nothing here decides that FOR him. isPackage/packageItemIds are the only
+// two fields that make one different from a regular submittal; deleting one
+// of the items it references just makes packageCardHTML below quietly show
+// one fewer line — the package itself doesn't need to be kept in sync.
+function packageCardHTML(pkg){
+  const items = (pkg.packageItemIds||[]).map(id=>state.submittals.find(su=>su.id===id)).filter(Boolean);
+  return `
+    <div class="spec-card" style="border-color:var(--steel-dim); cursor:pointer;" onclick="openSubmittalDetail('${pkg.id}')">
+      <div class="spec-card-head">
+        <div>
+          <div class="spec-section">${esc(pkg.id)}</div>
+          <div class="spec-title">${icon('package')} ${esc(pkg.description||'Total Submittal Package')}</div>
+          <div class="issue-meta">${pkg.dateSubmitted?`Sent ${pkg.dateSubmitted}`:'Not yet sent'} · ${items.length} item${items.length===1?'':'s'}</div>
+        </div>
+        <div style="display:flex; gap:6px; align-items:flex-start;">
+          ${badge(pkg.status)}
+          ${readOnly?'':`<button class="btn sm secondary" onclick="event.stopPropagation(); deleteSubmittal('${pkg.id}')" title="Delete this package">${icon('trash')}</button>`}
+        </div>
+      </div>
+      ${items.length===0 ? `<div class="issue-meta" style="margin-top:8px;">No items in this package.</div>` : `<div class="issue-meta" style="margin-top:8px;">${items.map(it=>esc(it.description)).join(' · ')}</div>`}
     </div>`;
-  if(view==='log') return head + renderSubmittalLog(job, specs, submittals);
+}
+function openPackageSubmittalModal(){ openModal('submittal-package'); }
+function renderSubmittalsPage(job, specs, submittals){
+  const filterId = ui.submittalsSpecFilter || '';
+  const filtered = filterId ? submittals.filter(su=>su.specId===filterId) : submittals;
+  const packages = filtered.filter(su=>su.isPackage);
+  const singles = filtered.filter(su=>!su.isPackage);
+  const specOptions = specs.slice().sort((a,b)=>(a.section||'').localeCompare(b.section||'', undefined, {numeric:true})).map(sp=>
+    `<option value="${sp.id}" ${filterId===sp.id?'selected':''}>${esc(sp.section||'—')} ${esc(sp.title||'')}</option>`).join('');
+  const head = `
+    <div class="panel-head"><h3>Submittals</h3>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <select id="submittals-spec-filter" onchange="setSubmittalsSpecFilter(this.value)" style="max-width:260px;">
+          <option value="">All specs</option>
+          ${specOptions}
+        </select>
+        <button class="btn sm safety" ${disabledAttr()} onclick="openPackageSubmittalModal()">${icon('package')} Create total package submittal</button>
+      </div>
+    </div>
+    <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 14px;">Every submittal on this job, fed by the specs it's tied to — scan a spec's PDF or generate the standard checklist from the Specs tab to add more here. Tap a row (or a package card) for its full transmittal, or delete one that doesn't need to be submitted.</p>`;
+  const packageSection = packages.length===0 ? '' : `
+    <div class="section-title">${icon('package')} Total package submittals</div>
+    ${packages.map(pkg=>packageCardHTML(pkg)).join('')}
+    <div class="section-title" style="margin-top:20px;">All submittals</div>`;
+  const logSection = singles.length===0
+    ? emptyBlock('fileText', filterId ? 'No submittals logged for this spec yet.' : 'No submittals logged yet — add one from a spec on the Specs tab, or scan a spec\'s PDF.')
+    : renderSubmittalLog(job, specs, singles);
+  return head + packageSection + logSection;
+}
+function renderSpecs(job, specs, submittals){
+  const head = `
+    <div class="panel-head"><h3>Specifications</h3><button class="btn sm safety" ${disabledAttr()} onclick="openModal('spec')">${icon('plus')} Add specification</button></div>
+    <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 14px;">Upload each spec section here. "Scan for submittals" reads its PDF and "Generate checklist" adds the standard categories — both land as drafts on the Submittals tab.</p>`;
   const cards = specs.map(sp=>{
-    const subs = submittals.filter(su=>su.specId===sp.id);
-    const rows = subs.map(su=>`
-      <tr onclick="openSubmittalDetail('${su.id}')" style="cursor:pointer;">
-        <td data-label="ID" class="idcell">${su.id}</td>
-        <td data-label="Description">${esc(su.description)}${su.attachments&&su.attachments.length?`<div class="issue-meta">${icon('paperclip')} ${su.attachments.length} file${su.attachments.length>1?'s':''}</div>`:''}</td>
-        <td data-label="Submitted">${su.dateSubmitted||'—'}</td>
-        <td data-label="Status">${badge(su.status)}</td>
-      </tr>`).join('');
+    const subCount = submittals.filter(su=>su.specId===sp.id).length;
     const atts = sp.attachments || [];
     const hasPdf = atts.some(a=>isPdfAttachment(a));
     return `
@@ -4602,7 +4692,7 @@ function renderSpecs(job, specs, submittals){
           ${sp.notes?`<div class="issue-meta">${esc(sp.notes)}</div>`:''}
         </div>
         <div style="display:flex; gap:6px; flex-wrap:wrap;">
-          <button class="btn sm secondary" ${disabledAttr()} onclick="scanSpecForSubmittals('${sp.id}')" title="${hasPdf?'Best-effort — scans the uploaded PDF for a Submittals list and adds what it finds as drafts':'Upload the spec PDF first, then this can scan it for submittal requirements'}">${icon('fileUpload')} Scan for submittals</button>
+          <button class="btn sm secondary" ${disabledAttr()} onclick="scanSpecForSubmittals('${sp.id}')" title="${hasPdf?'Best-effort — scans the uploaded PDF for a Submittals list and adds what it finds as drafts on the Submittals tab':'Upload the spec PDF first, then this can scan it for submittal requirements'}">${icon('fileUpload')} Scan for submittals</button>
           <button class="btn sm secondary" ${disabledAttr()} onclick="generateSubmittalChecklist('${sp.id}')">${icon('clipboardList')} Generate checklist</button>
           <button class="btn sm secondary" ${disabledAttr()} onclick="openSubmittalModal('${sp.id}')">${icon('plus')} Add submittal</button>
           <button class="btn sm secondary" ${disabledAttr()} onclick="deleteSpec('${sp.id}')">${icon('trash')}</button>
@@ -4611,12 +4701,10 @@ function renderSpecs(job, specs, submittals){
       <div style="margin:8px 0;">${atts.length===0 ? `<div class="issue-meta">No spec document uploaded — nothing to download or scan yet.</div>` : `<div class="attach-grid">${atts.map((a,i)=>`
         <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener" download="${esc(a.name)}">${icon('fileTypePdf')} ${esc(a.name)}</a>
         ${readOnly?'':`<button type="button" class="attach-remove" onclick="removeSpecAttachment('${sp.id}', ${i})" aria-label="Remove">&times;</button>`}</div>`).join('')}</div>`}</div>
-      ${subs.length===0 ? `<div class="empty" style="padding:16px;">${icon('fileText')}No submittals logged for this spec yet.</div>` : `
-      <table style="margin-top:12px;"><thead><tr><th>ID</th><th>Description</th><th>Submitted</th><th>Status</th></tr></thead>
-      <tbody>${rows}</tbody></table>`}
+      <div class="issue-meta" style="margin-top:10px; cursor:pointer; text-decoration:underline;" onclick="viewSubmittalsForSpec('${sp.id}')">${icon('fileText')} ${subCount} submittal${subCount===1?'':'s'} logged for this spec — view on the Submittals tab</div>
     </div>`;
   }).join('');
-  return head + (specs.length===0 ? emptyBlock('fileText','No specifications tied to this job yet — add one, then log its submittals underneath.') : cards);
+  return head + (specs.length===0 ? emptyBlock('fileText','No specifications tied to this job yet — add one, then scan or log its submittals from the Submittals tab.') : cards);
 }
 
 /* ---- Contacts ---- */
@@ -8307,6 +8395,37 @@ function modalHTML(type){
       <button class="btn safety" onclick="submitSubmittal()">Add submittal</button></div>
     </div>`;
   }
+  if(type==='submittal-package'){
+    // Greg, asked directly: pick which items go in with checkboxes, not
+    // auto-grab everything — see submitPackageSubmittal. Existing packages
+    // are excluded from the picker so packages can't nest inside packages.
+    const eligible = state.submittals.filter(su=>su.jobId===ui.jobId && !su.isPackage);
+    const bySpec = new Map();
+    eligible.forEach(su=>{
+      const key = su.specId || '';
+      if(!bySpec.has(key)) bySpec.set(key, []);
+      bySpec.get(key).push(su);
+    });
+    const groups = Array.from(bySpec.entries()).map(([specId, list])=>{
+      const spec = state.specs.find(sp=>sp.id===specId);
+      const label = spec ? `${spec.section||'—'} ${spec.title||''}`.trim() : 'No spec';
+      const rows = list.map(su=>`
+        <label style="display:flex; align-items:flex-start; gap:8px; padding:6px 0; border-bottom:1px solid var(--line);">
+          <input type="checkbox" class="chk-pkg-item" value="${su.id}" style="margin-top:3px;">
+          <span>${esc(su.id)} — ${esc(su.description)} ${badge(su.status)}</span>
+        </label>`).join('');
+      return `<div class="section-title" style="margin-top:14px;">${esc(label)}</div>${rows}`;
+    }).join('');
+    return `<div class="modal" style="max-width:640px;">
+      <h3>${icon('package')} Create total package submittal</h3>
+      <p class="sub">${esc(ui.jobId)} — check every submittal to bundle in, then create. It becomes one transmittal you can send as a single package; the individual submittals stay in the log too.</p>
+      <div class="field"><label>Package description</label><input id="f-pkg-desc" value="Total Submittal Package" placeholder="e.g. Total Submittal Package — Round 1"></div>
+      ${eligible.length===0 ? `<div class="issue-meta">No submittals logged yet to package — add some from the Specs tab first.</div>` : `<div style="max-height:340px; overflow-y:auto; margin-top:4px;">${groups}</div>`}
+      <div class="err" id="f-err"></div>
+      <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Cancel</button>
+      ${eligible.length===0 ? '' : `<button class="btn safety" onclick="submitPackageSubmittal()">${icon('package')} Create package</button>`}</div>
+    </div>`;
+  }
   if(type==='invoice'){
     return `<div class="modal">
       <h3>Add invoice</h3><p class="sub">${ui.jobId}</p>
@@ -9034,8 +9153,15 @@ function openSubmittalDetail(subId){
 function submittalDetailHTML(su){
   const spec = state.specs.find(sp=>sp.id===su.specId);
   const li = (su.lineItems&&su.lineItems.length) ? su.lineItems : [{copies:'', date:'', no:'', description:su.description||''}];
+  const packageContents = su.isPackage ? `
+    <div class="section-title">${icon('package')} Package contents</div>
+    <div class="issue-meta" style="margin-bottom:14px;">${(su.packageItemIds||[]).map(id=>{
+      const it = state.submittals.find(x=>x.id===id);
+      return it ? `${esc(it.id)} — ${esc(it.description)}` : `${esc(id)} (deleted)`;
+    }).join('<br>')}</div>` : '';
   return `<div class="modal" style="max-width:720px;">
-    <h3>${esc(su.id)}</h3><p class="sub">${esc(spec?spec.section:'')} ${esc(spec?spec.title:'')} — C/S Erectors standard submittal transmittal</p>
+    <h3>${esc(su.id)}</h3><p class="sub">${su.isPackage ? 'Total package submittal' : `${esc(spec?spec.section:'')} ${esc(spec?spec.title:'')}`} — C/S Erectors standard submittal transmittal</p>
+    ${packageContents}
     <div class="field-row">
       <div class="field"><label>To</label><input id="sub-detail-to" value="${esc(su.to||'')}" ${disabledAttr()}></div>
       <div class="field"><label>Date</label><input type="date" id="sub-detail-date" value="${su.dateSubmitted||''}" ${disabledAttr()} onchange="updateSubmittalDate('${su.id}', this.value)"></div>
@@ -9081,7 +9207,8 @@ function submittalDetailHTML(su){
     </div>
     <div class="err" id="sub-detail-err"></div>
     <div class="modal-actions">
-      ${readOnly ? '' : `<button class="btn safety" style="margin-right:auto;" onclick="saveSubmittalForm('${su.id}')">${icon('circleCheck')} Save form</button>`}
+      ${readOnly ? '' : `<button class="btn secondary" style="margin-right:auto;" onclick="deleteSubmittal('${su.id}')">${icon('trash')} Delete</button>`}
+      ${readOnly ? '' : `<button class="btn safety" onclick="saveSubmittalForm('${su.id}')">${icon('circleCheck')} Save form</button>`}
       <button class="btn secondary" onclick="closeModal()">Close</button>
     </div>
   </div>`;
@@ -9113,6 +9240,41 @@ function saveSubmittalForm(subId){
     sentBy: document.getElementById('sub-detail-sentby').value.trim()
   };
   commit({type:'updateSubmittal', subId, patch});
+  closeModal();
+}
+function deleteSubmittal(subId){
+  if(!confirm("Delete this submittal? This can't be undone.")) return;
+  commit({type:'deleteSubmittal', subId});
+  closeModal();
+}
+function openPackageSubmittalModal(){ openModal('submittal-package'); }
+// Greg confirmed (asked directly): the total package submittal should let
+// him hand-pick which logged items go in via checkboxes, not auto-grab
+// everything — see the 'submittal-package' modal in modalHTML. A package is
+// otherwise a completely normal submittal/transmittal (same to/date/
+// send-method/line-items shape as any other, editable the same way
+// afterward in submittalDetailHTML) — isPackage/packageItemIds are the only
+// two fields that mark it as one.
+function submitPackageSubmittal(){
+  const ids = Array.from(document.querySelectorAll('.chk-pkg-item:checked')).map(el=>el.value);
+  const err = document.getElementById('f-err');
+  if(ids.length===0){
+    if(err){ err.textContent = 'Check at least one submittal to include.'; err.style.display='block'; }
+    return;
+  }
+  const desc = (document.getElementById('f-pkg-desc').value||'').trim() || 'Total Submittal Package';
+  const items = ids.map(id=>state.submittals.find(su=>su.id===id)).filter(Boolean);
+  const job = getJob(ui.jobId);
+  const lineItems = items.map(it=>({copies:'', date:'', no:it.id, description:it.description}));
+  const entry = {
+    id: nextPackageSubmittalId(ui.jobId), jobId: ui.jobId, specId: null,
+    isPackage: true, packageItemIds: ids,
+    description: desc, dateSubmitted: '', status: 'Draft', attachments: [],
+    to: job ? (job.gc||'') : '', jobNo: ui.jobId, re: desc, attn: '',
+    sendMethod: [], viaMethod: [], itemTypes: [], lineItems,
+    transmittedPurpose: [], bidsDueOn: '', remarks: '', sentBy: currentUserName || ''
+  };
+  commit({type:'addSubmittal', entry});
   closeModal();
 }
 async function handleSubmittalDocSelect(e, subId){
