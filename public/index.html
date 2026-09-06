@@ -8286,6 +8286,35 @@ function aarSectionHTML(label, entries){
     <div class="section-title" style="margin-top:20px;">${esc(label)} (${entries.length})</div>
     ${entries.length===0 ? `<div class="issue-meta" style="padding:2px 0 8px;">Nothing logged yet.</div>` : rows}`;
 }
+// Greg asked for the After Action Report to surface a summary of all notes —
+// the Notes tab is a separate per-job log (general/field-observation/delay/
+// PM-Foreman conversation entries, plus the auto-linked "After Action Report"
+// category above) that a PM shouldn't have to tab-hop to review before
+// running a milestone meeting. This pulls every Notes-tab entry for the job,
+// newest first, as read-only reference material — editing/adding notes still
+// happens on the Notes tab itself, so no delete/edit controls here.
+function renderAARNotesSummary(job){
+  const notes = state.notes.filter(n=>n.jobId===job.id);
+  if(notes.length===0){
+    return `
+    <div class="section-title" style="margin-top:0;">Notes summary</div>
+    <div class="issue-meta" style="padding:2px 0 8px;">No notes logged for this job yet — add them from the Notes tab.</div>`;
+  }
+  const sorted = notes.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const rows = sorted.map(n=>`
+    <div class="log-entry">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+        <div style="flex:1; min-width:0;">
+          <div class="lmeta">${n.date||''} · ${esc(n.author||'—')} · ${esc(n.category||'General')}</div>
+          <div style="font-size:13.5px; margin-top:4px;">${esc(n.text)}</div>
+        </div>
+      </div>
+    </div>`).join('');
+  return `
+    <div class="section-title" style="margin-top:0;">Notes summary (${notes.length})</div>
+    <div class="issue-meta" style="margin-bottom:8px;">Every note logged on the Notes tab for this job, newest first — reference material for the after-action meetings below. Add or edit notes from the Notes tab itself.</div>
+    ${rows}`;
+}
 function renderAAR(job, aarEntries){
   const general = aarEntries.filter(e=>!e.milestone);
   const generalGroups = groupGeneralAARByDate(general, job);
@@ -8294,6 +8323,7 @@ function renderAAR(job, aarEntries){
   return `
     <div class="panel-head"><h3>After Action Report</h3></div>
     <div class="issue-meta" style="margin-bottom:12px;">A running, shared log for the PM, Superintendent, Operations Manager, and Foreman — notes, inefficiencies, hiccups, and delays as the job progresses. Log things here as they happen, then use it to run the Quarter, Halfway, Three-Quarter, and Completion after-action meetings.</div>
+    ${renderAARNotesSummary(job)}
     ${renderAARMilestoneDates(job)}
     ${readOnly ? '' : `
     <div class="co-summary" style="margin-bottom:14px;">
