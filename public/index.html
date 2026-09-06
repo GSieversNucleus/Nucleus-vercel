@@ -16,6 +16,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Archivo+Expanded:wght@700&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>if(window.pdfjsLib){ try{ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; }catch(e){} }</script>
 <!-- Jobs Map — Leaflet + OpenStreetMap tiles, both free and needing no API key.
      This build (unlike the Claude Artifact master) isn't running inside a
@@ -740,6 +741,7 @@
       <div class="team-dropdown" id="team-dropdown" hidden></div>
     </div>
     <button class="home-btn" onclick="openStandardsPage()" title="Company-wide standards and procedures — not tied to any one job"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1Z"/><path d="M6 6h12a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z"/><path d="M9 11h6M9 14h6M9 17h3.5"/></svg> Standards</button>
+    <button class="home-btn" onclick="openWeldingLibraryPage()" title="Company-wide welding procedures (WPS/PQR) — not tied to any one job"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.8c1 3-2.6 4.2-2.6 7.2a2.6 2.6 0 0 0 5.2 0c0-.8-.3-1.5-.8-2.1.9.5 2.2 1.8 2.2 4.1a4.9 4.9 0 0 1-9.8 0c0-4.3 3.4-5.3 3.4-9Z"/><path d="M12 21.2c-1.6 0-2.9-1.1-2.9-2.6"/></svg> Welding Procedures</button>
     <button class="home-btn" onclick="openMapPage()" title="See every job's location pinned on a map, to gauge how spread out they are"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.5-7-11.5A7 7 0 0 1 19 9.5C19 14.5 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/></svg> Job Location Map</button>
     <button class="home-btn" onclick="openPostitPage()" title="Your own personal sticky-note board — not tied to any one job, not shared"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h11l3 3v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"/><path d="M16 5v3a1 1 0 0 0 1 1h3"/></svg> Post it Board</button>
     <button class="home-btn" onclick="downloadBackup()" title="Download a full backup of everything entered in Nucleus"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10m0 0-3.5-3.5M12 14l3.5-3.5"/><path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></svg> Backup data</button>
@@ -869,7 +871,7 @@ let state = defaultState();
 // previewRole (Feature A, "View as") is UI-only, like everything else on `ui` —
 // never saved, never sent anywhere, always starts unset on a fresh load. See
 // getEffectiveTeamMember/setPreviewRole/exitPreview near Team & identity below.
-let ui = { view: 'home', jobId: null, tab: 'overview', costSubTab: 'impacts', coView: 'cards', specsView: 'cards', scheduleMonth: currentMonthStr(), homeMonth: currentMonthStr(), overviewCalMonth: currentMonthStr(), overviewCalMode: 'field', searchScope: 'all', engFilterJobId: '', schedFilterJobId: '', mpHoursPerDay: 8, opsCalJobId: '', opsCalMonth: currentMonthStr(), opsCalMode: 'field', superSchedMonth: currentMonthStr(), jobLogAuthor: '', jobLogBucket: '', previewRole: null,
+let ui = { view: 'home', jobId: null, weldingJobFilter: 'all', tab: 'overview', costSubTab: 'impacts', coView: 'cards', specsView: 'cards', scheduleMonth: currentMonthStr(), homeMonth: currentMonthStr(), overviewCalMonth: currentMonthStr(), overviewCalMode: 'field', searchScope: 'all', engFilterJobId: '', schedFilterJobId: '', mpHoursPerDay: 8, opsCalJobId: '', opsCalMonth: currentMonthStr(), opsCalMode: 'field', superSchedMonth: currentMonthStr(), jobLogAuthor: '', jobLogBucket: '', previewRole: null,
   // Bug fix (View As): Foreman/Project Manager preview needs a SPECIFIC real
   // person picked, since their visibility is id-based — see
   // getEffectiveTeamMember/setPreviewMemberId. Reset alongside previewRole
@@ -1224,7 +1226,7 @@ function submitEditTeamMember(id){
 // 'meetingminutes' (Feature H) sits right after 'notes' — same coordination
 // tool, no financial data, and (per the FOREMAN_ALLOWED_TABS comment below)
 // visible to the exact same roles Notes already is, Foreman included.
-const JOB_TAB_ORDER = ['fieldkit','overview','scope','specs','submittals','elevations','contacts','rfis','costs','budgetcosts','contract','hours','requests','engineering','schedule','procurement','safety','welding','watertest','notes','meetingminutes','aar'];
+const JOB_TAB_ORDER = ['fieldkit','overview','scope','specs','submittals','elevations','contacts','rfis','costs','budgetcosts','contract','hours','requests','engineering','schedule','procurement','safety','watertest','notes','meetingminutes','aar'];
 // 'elevations' and 'costs' were REMOVED from this list per Greg's request:
 // "Take away costs and elevations on the side bar for Foreman. They should
 // have everything in their Field Tool Kit section." A Foreman no longer gets
@@ -1238,7 +1240,7 @@ const JOB_TAB_ORDER = ['fieldkit','overview','scope','specs','submittals','eleva
 // real standalone tab via that person's tabOverrides (see "Per-person tab
 // overrides" below) — removing them from this default list only changes what
 // a Foreman sees with no override set.
-const FOREMAN_ALLOWED_TABS = ['fieldkit','scope','specs','submittals','contacts','rfis','requests','schedule','procurement','safety','welding','watertest','notes','meetingminutes','aar','alllogs'];
+const FOREMAN_ALLOWED_TABS = ['fieldkit','scope','specs','submittals','contacts','rfis','requests','schedule','procurement','safety','watertest','notes','meetingminutes','aar','alllogs'];
 // "Contract" (contract + Green Sheet documents, and the budget-by-system table keyed
 // in from the Green Sheet) is the one tab that works the other way round from the
 // Foreman restriction above: it's hidden from everyone EXCEPT Operations Manager and
@@ -1268,7 +1270,6 @@ const OVERRIDABLE_TABS = [
   {key:'schedule', label:'Field Schedule'},
   {key:'procurement', label:'Procurement'},
   {key:'safety', label:'Safety Docs'},
-  {key:'welding', label:'Welding Procedures'},
   {key:'watertest', label:'Water Testing'},
   {key:'notes', label:'Notes'},
   {key:'meetingminutes', label:'Meeting Minutes'},
@@ -1483,8 +1484,6 @@ function searchApp(query){
     .map(e=>({jobId:e.jobId, tab:'engineering', title:`${e.id} — ${e.title}`, snippet:jobLabel(e.jobId)+(e.dateNeeded?` · needed ${e.dateNeeded}`:'')+(e.assignedEngineer?` · ${e.assignedEngineer}`:'')})));
   pushGroup('Safety Docs', state.safetyDocs.filter(s=>inScope(s.jobId) && matches(s.id,s.title,s.category,s.description))
     .map(s=>({jobId:s.jobId, tab:'safety', title:s.title, snippet:jobLabel(s.jobId)+(s.category?` · ${s.category}`:'')})));
-  pushGroup('Welding Procedures', state.weldingProcedures.filter(w=>inScope(w.jobId) && matches(w.id,w.wpsNumber,w.pqrNumber,w.baseMaterial,w.process,w.notes))
-    .map(w=>({jobId:w.jobId, tab:'welding', title:`${w.wpsNumber||w.id}`, snippet:jobLabel(w.jobId)+(w.process?` · ${w.process}`:'')})));
   pushGroup('Water Testing', state.waterTests.filter(w=>inScope(w.jobId) && matches(w.id,w.testType,w.location,w.notes))
     .map(w=>({jobId:w.jobId, tab:'watertest', title:`${w.testType||w.id} — ${w.location||''}`, snippet:jobLabel(w.jobId)+(w.date?` · ${w.date}`:'')})));
   // Feature D: Field Tool Kit's two new logs, searchable like everything else.
@@ -1729,7 +1728,7 @@ let readOnly = false;
 let stateVersion = 0;
 let pollTimer = null;
 
-function defaultState(){ return { jobs: [], rfis: [], cos: [], issues: [], logs: [], hours: [], contacts: [], scope: [], specs: [], submittals: [], invoices: [], projectedCosts: [], schedule: [], notes: [], requests: [], elevations: [], procurement: [], ganttLogs: [], scheduleUpdates: [], engineering: [], scheduleFieldNotes: [], team: [], aar: [], gcCommLog: [], greenSheets: [], materials: [], greenSheetQuotes: [], standards: [], safetyDocs: [], weldingProcedures: [], waterTests: [], elevationMarkups: [], equipmentLog: [], dailyReports: [], postItBoards: [], meetingMinutes: [], notifications: [] }; }
+function defaultState(){ return { jobs: [], rfis: [], cos: [], issues: [], logs: [], hours: [], contacts: [], scope: [], specs: [], submittals: [], invoices: [], projectedCosts: [], schedule: [], notes: [], requests: [], elevations: [], procurement: [], ganttLogs: [], scheduleUpdates: [], engineering: [], scheduleFieldNotes: [], team: [], aar: [], gcCommLog: [], greenSheets: [], materials: [], greenSheetQuotes: [], standards: [], safetyDocs: [], weldingProcedures: [], weldingLibrarySeeded: false, waterTests: [], elevationMarkups: [], equipmentLog: [], dailyReports: [], postItBoards: [], meetingMinutes: [], notifications: [] }; }
 // Migration: legacy single-PM assignment (job.assignedPM, one team-member
 // id) -> multi-PM array (job.assignedPMs), mirroring how assignedForemen has
 // always worked. Called everywhere `state` gets reassigned from a fresh
@@ -1811,6 +1810,44 @@ function migrateProjectedCosts(){
     }
   });
   state.projectedCosts = [];
+  return true;
+}
+// Migration + one-time seed: Welding Procedures moved from a per-job sidebar
+// tab to a single company-wide library (reached from the "Welding
+// Procedures" button in the top bar, next to Standards) — see the big
+// comment above WELDING_PROCESSES/renderWeldingLibraryPage. Any pre-existing
+// per-job entries keep their old jobId by folding it into the new
+// applicableJobIds array, so nothing already keyed in loses its job tag. If
+// the library is completely empty the first time this runs (a fresh
+// install, or a job that never used the old tab), seed it with reference
+// starting points for C/S Erectors' most common scopes so there's something
+// to build from on day one — each one is explicitly labeled a starting
+// point, since these are generic AWS-code references, not Greg's actual
+// certified WPS/PQR paperwork. Guarded by weldingLibrarySeeded so it only
+// ever runs once, same idempotent pattern as the migrations above.
+function migrateWeldingLibrary(){
+  if(state.weldingLibrarySeeded) return false;
+  state.weldingLibrarySeeded = true;
+  state.weldingProcedures.forEach(w=>{
+    if(!Array.isArray(w.applicableJobIds)) w.applicableJobIds = w.jobId ? [w.jobId] : [];
+  });
+  if(state.weldingProcedures.length === 0){
+    const seedRow = (id, category, wpsNumber, process, baseMaterial, thicknessRange, positions, notes) => ({
+      id, category, wpsNumber, pqrNumber: '', process, baseMaterial, thicknessRange, positions, applicableJobIds: [], notes, date: todayStr(), attachments: []
+    });
+    state.weldingProcedures.push(
+      seedRow('WPS-STUD-01', 'Stud Welding', 'WPS-STUD-01', 'Stud welding (arc)', 'A36/A992 structural steel deck & framing', 'Per AWS D1.1 Ch. 7 stud-diameter table', ['Flat','Vertical'],
+        "Reference starting point for arc stud welding of shear studs to steel deck/beams (AWS D1.1 Ch. 7) — swap in your shop's certified WPS number, PQR, and welder qualification records, and attach the signed document, before this goes into a GC submittal package."),
+      seedRow('WPS-DECK-01', 'Fillet Welds — Plate to Edge of Steel Deck', 'WPS-DECK-01', 'FCAW', 'A1008/A36 steel plate to steel deck edge', '18–22 ga. deck to 1/4"–3/8" plate', ['Flat','Horizontal'],
+        "Reference starting point for fillet welds attaching plate to the edge of steel deck (AWS D1.3) — replace with your shop's certified WPS/PQR and attach the signed document before submitting to a GC."),
+      seedRow('WPS-FLARE-01', 'Flare Bevel Groove Welds', 'WPS-FLARE-01', 'GMAW (MIG)', 'HSS/round tube and angle to plate or embed', 'Per AWS D1.1 Table 3.3 (flare bevel groove effective throat)', ['Flat','Horizontal','Vertical'],
+        "Reference starting point for flare bevel groove welds on tube/angle stock (AWS D1.1) — replace with your shop's certified WPS/PQR before it goes into a GC package."),
+      seedRow('WPS-SS-01', 'Stainless Steel Welding — Handrails', 'WPS-SS-01', 'GTAW (TIG)', '304/316 stainless steel handrail tube & fittings', '1/16" – 3/16" wall', ['Flat','Horizontal','Vertical','Overhead'],
+        "Reference starting point for TIG welding of stainless handrails/guardrails (AWS D1.6) — replace with your shop's certified WPS/PQR and attach the signed document before submitting."),
+      seedRow('WPS-ANGLE-01', 'Steel L-Angles to Edge of Deck', 'WPS-ANGLE-01', 'FCAW', 'Steel L-angle to steel deck edge', '18–22 ga. deck to 1/8"–1/4" angle', ['Flat','Horizontal'],
+        "Reference starting point for fillet-welding steel L-angles to the edge of deck (AWS D1.3) — replace with your shop's certified WPS/PQR and attach the signed document before submitting to a GC.")
+    );
+  }
   return true;
 }
 function stateBytes(s){ return new Blob([JSON.stringify(s)]).size; }
@@ -3337,82 +3374,162 @@ function removeSafetyDocAttachment(event, idx){
   refreshSafetyDocDetail(id);
 }
 
-/* ---- Welding Procedures: per-job WPS/PQR reference log — structured fields
-   matching what a shop/field crew actually needs to check before welding: process,
-   base material, thickness range, and qualified position(s), plus the actual
-   WPS/PQR document. Visible to everyone on the job, including Foreman. Add + delete
-   only, consistent with Standards/Procedures and Safety Docs. ---- */
-const WELDING_PROCESSES = ['GMAW (MIG)','FCAW','SMAW (Stick)','GTAW (TIG)','SAW','Other'];
+/* ---- Welding Procedures: a company-wide library of WPS/PQR reference
+   documents, not tied to any one job — reached from the "Welding Procedures"
+   button in the top bar, same pattern as Standards/Procedures. C/S Erectors'
+   day-to-day scopes are stud welding, fillet welds (plate to edge of steel
+   deck), flare bevel groove welds, stainless steel welding of handrails, and
+   steel L-angles to edge of deck, so those are the starting categories (see
+   the one-time seed migration in boot()) — add more as new scopes come up.
+   Each entry can be tagged with which job(s) it applies to (optional — leave
+   blank for a general-reference procedure not tied to a specific job's
+   package) so a job's team can quickly pull just what applies to them, and
+   entries can be selected and downloaded individually or bundled into one
+   .zip package to submit to a GC (see downloadWeldingSelected below). Add +
+   delete only, consistent with Standards/Procedures and Safety Docs. ---- */
+const WELDING_PROCESSES = ['GMAW (MIG)','FCAW','SMAW (Stick)','GTAW (TIG)','SAW','Stud welding (arc)','Other'];
 const WELDING_POSITIONS = ['Flat','Horizontal','Vertical','Overhead'];
-function renderWelding(job, items){
-  const rows = items.slice().sort((a,b)=>(a.wpsNumber||'').localeCompare(b.wpsNumber||'')).map(w=>{
-    const docCount = (w.attachments||[]).length;
-    const positions = (w.positions||[]).join(', ') || '—';
-    return `
-      <div class="log-entry">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+const WELDING_CATEGORIES = ['Stud Welding','Fillet Welds — Plate to Edge of Steel Deck','Flare Bevel Groove Welds','Stainless Steel Welding — Handrails','Steel L-Angles to Edge of Deck'];
+function nextWeldingId(){ return `WPS-${String(state.weldingProcedures.length+1).padStart(3,'0')}`; }
+function weldingCategories(){
+  return Array.from(new Set([...WELDING_CATEGORIES, ...state.weldingProcedures.map(w=>w.category).filter(Boolean)]));
+}
+let weldingLibrarySelection = new Set();
+function openWeldingLibraryPage(){ ui.view='weldingLibrary'; weldingLibrarySelection = new Set(); render(); }
+function renderWeldingLibraryPage(){
+  const app = document.getElementById('app');
+  const banner = readOnly ? `<div class="readonly-banner">${icon('helpCircle')} You have a read-only view of this command center — changes here won't be saved.</div>` : '';
+  app.innerHTML = `
+    ${banner}
+    <span class="breadcrumb" onclick="goHome()">${icon('arrowLeft')} All jobs</span>
+    ${renderWeldingLibrarySection()}`;
+}
+function setWeldingJobFilter(jobId){
+  ui.weldingJobFilter = jobId || 'all';
+  weldingLibrarySelection = new Set();
+  renderWeldingLibraryPage();
+}
+function toggleWeldingSelect(id){
+  if(weldingLibrarySelection.has(id)) weldingLibrarySelection.delete(id); else weldingLibrarySelection.add(id);
+  renderWeldingLibraryPage();
+}
+function clearWeldingSelection(){
+  weldingLibrarySelection = new Set();
+  renderWeldingLibraryPage();
+}
+function weldingRowHTML(w){
+  const docCount = (w.attachments||[]).length;
+  const positions = (w.positions||[]).join(', ') || '—';
+  const jobNames = (w.applicableJobIds||[]).map(id=>{ const j=state.jobs.find(x=>x.id===id); return j?j.name:null; }).filter(Boolean);
+  const checked = weldingLibrarySelection.has(w.id) ? 'checked' : '';
+  return `
+    <div class="log-entry">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+        <div style="display:flex; gap:10px; flex:1; min-width:0;">
+          <input type="checkbox" ${checked} onchange="toggleWeldingSelect('${w.id}')" style="margin-top:3px;">
           <div style="flex:1; min-width:0;">
             <div style="font-weight:700; font-size:13.5px;">${esc(w.wpsNumber||'(no WPS #)')}${w.pqrNumber?` <span class="issue-meta">· PQR ${esc(w.pqrNumber)}</span>`:''}</div>
             <div class="issue-meta" style="margin-top:2px;">${esc(w.process||'—')} · ${esc(w.baseMaterial||'—')}${w.thicknessRange?` · ${esc(w.thicknessRange)}`:''} · Positions: ${esc(positions)}</div>
             ${w.notes?`<div style="font-size:13px; margin-top:4px;">${esc(w.notes)}</div>`:''}
-            <div class="issue-meta" style="margin-top:4px;">${docCount?`${icon('paperclip')} ${docCount} document${docCount>1?'s':''}`:'No documents attached yet'}</div>
-          </div>
-          <div style="display:flex; gap:6px; flex-shrink:0;">
-            <button class="btn sm secondary" onclick="openWeldingDetail('${w.id}')">${icon('fileText')} Open</button>
-            <button class="btn sm secondary" ${disabledAttr()} onclick="deleteWeldingProcedure('${w.id}')">${icon('trash')}</button>
+            <div class="issue-meta" style="margin-top:4px;">${docCount?`${icon('paperclip')} ${docCount} document${docCount>1?'s':''}`:'No documents attached yet'}${jobNames.length?` · Applies to: ${esc(jobNames.join(', '))}`:''}</div>
           </div>
         </div>
-      </div>`;
+        <div style="display:flex; gap:6px; flex-shrink:0;">
+          <button class="btn sm secondary" onclick="openWeldingDetail('${w.id}')">${icon('fileText')} Open</button>
+          <button class="btn sm secondary" ${disabledAttr()} onclick="deleteWeldingProcedure('${w.id}')">${icon('trash')}</button>
+        </div>
+      </div>
+    </div>`;
+}
+function renderWeldingLibrarySection(){
+  const jobFilter = ui.weldingJobFilter || 'all';
+  const allItems = state.weldingProcedures.slice();
+  const items = jobFilter==='all' ? allItems : allItems.filter(w=>(w.applicableJobIds||[]).includes(jobFilter));
+  const cats = weldingCategories();
+  const grouped = cats.map(cat=>{
+    const list = items.filter(w=>w.category===cat).sort((a,b)=>(a.wpsNumber||'').localeCompare(b.wpsNumber||''));
+    if(!list.length) return '';
+    return `<div class="section-title">${esc(cat)}</div>${list.map(w=>weldingRowHTML(w)).join('')}`;
   }).join('');
+  const uncategorized = items.filter(w=>!w.category || !cats.includes(w.category));
+  const uncatHtml = uncategorized.length ? `<div class="section-title">Other</div>${uncategorized.map(w=>weldingRowHTML(w)).join('')}` : '';
+  const selectedCount = weldingLibrarySelection.size;
   return `
     <div class="panel-head"><h3>Welding Procedures</h3></div>
-    <div class="issue-meta" style="margin-bottom:12px;">WPS/PQR reference log for this job — process, base material, thickness range, and qualified position(s), with the actual procedure document attached. Visible to everyone on the job, including Foreman.</div>
+    <div class="issue-meta" style="margin-bottom:12px;">Company-wide WPS/PQR reference library — process, base material, thickness range, and qualified position(s), with the actual procedure document attached. Visible to everyone, on any job. Select the ones a job needs and download them individually or as one package to submit to the GC.</div>
+    <div class="field" style="max-width:280px; margin-bottom:14px;"><label>Show procedures for</label>
+      <select id="wps-job-filter" onchange="setWeldingJobFilter(this.value)">
+        <option value="all" ${jobFilter==='all'?'selected':''}>All jobs</option>
+        ${state.jobs.map(j=>`<option value="${j.id}" ${jobFilter===j.id?'selected':''}>${esc(j.name)}</option>`).join('')}
+      </select>
+    </div>
+    ${selectedCount ? `
+    <div class="co-summary" style="margin-bottom:14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <strong>${selectedCount} selected</strong>
+      <button class="btn sm secondary" onclick="downloadWeldingSelected('individual')">${icon('fileUpload')} Download individually</button>
+      <button class="btn sm safety" onclick="downloadWeldingSelected('package')">${icon('fileUpload')} Download as package (.zip)</button>
+      <button class="btn sm secondary" onclick="clearWeldingSelection()">Clear selection</button>
+    </div>` : ''}
     ${readOnly ? '' : `
     <div class="co-summary" style="margin-bottom:14px;">
       <div class="field-row">
+        <div class="field"><label>Category</label><input id="wps-category" list="wps-category-list" placeholder="e.g. Stud Welding">
+          <datalist id="wps-category-list">${cats.map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+        </div>
         <div class="field"><label>WPS #</label><input id="wps-number" placeholder="e.g. WPS-101"></div>
+      </div>
+      <div class="field-row">
         <div class="field"><label>PQR # (optional)</label><input id="wps-pqr" placeholder="e.g. PQR-14"></div>
-      </div>
-      <div class="field-row">
         <div class="field"><label>Welding process</label><select id="wps-process">${WELDING_PROCESSES.map(p=>`<option>${p}</option>`).join('')}</select></div>
-        <div class="field"><label>Base material</label><input id="wps-material" placeholder="e.g. A36 steel, 6063-T6 aluminum"></div>
       </div>
       <div class="field-row">
+        <div class="field"><label>Base material</label><input id="wps-material" placeholder="e.g. A36 steel, 304 stainless"></div>
         <div class="field"><label>Thickness range</label><input id="wps-thickness" placeholder="e.g. 1/8&quot; – 1/2&quot;"></div>
-        <div class="field"><label>Position(s) qualified</label>
-          <div style="display:flex; gap:12px; flex-wrap:wrap; padding-top:6px;">
-            ${WELDING_POSITIONS.map(p=>`<label style="display:flex; align-items:center; gap:5px; font-size:13px; font-weight:400;"><input type="checkbox" class="wps-position-cb" value="${p}"> ${p}</label>`).join('')}
-          </div>
+      </div>
+      <div class="field"><label>Position(s) qualified</label>
+        <div style="display:flex; gap:12px; flex-wrap:wrap; padding-top:6px;">
+          ${WELDING_POSITIONS.map(p=>`<label style="display:flex; align-items:center; gap:5px; font-size:13px; font-weight:400;"><input type="checkbox" class="wps-position-cb" value="${p}"> ${p}</label>`).join('')}
+        </div>
+      </div>
+      <div class="field"><label>Applies to which job(s)? (optional — leave blank for a general reference procedure)</label>
+        <div style="display:flex; gap:12px; flex-wrap:wrap; padding-top:6px;">
+          ${state.jobs.map(j=>`<label style="display:flex; align-items:center; gap:5px; font-size:13px; font-weight:400;"><input type="checkbox" class="wps-job-cb" value="${j.id}"> ${esc(j.name)}</label>`).join('')}
         </div>
       </div>
       <div class="field"><label>Notes (optional)</label><textarea id="wps-notes" placeholder="Anything else worth flagging about this procedure"></textarea></div>
-      <button class="btn sm safety" onclick="submitWeldingProcedure('${job.id}')">${icon('plus')} Add welding procedure</button>
+      <button class="btn sm safety" onclick="submitWeldingProcedure()">${icon('plus')} Add welding procedure</button>
     </div>`}
-    ${items.length===0 ? emptyBlock('flame','No welding procedures added yet — add the first WPS, then attach its document from the Open button.') : rows}`;
+    ${items.length===0 ? emptyBlock('flame','No welding procedures added yet — add the first WPS, then attach its document from the Open button.') : (grouped + uncatHtml)}`;
 }
-function submitWeldingProcedure(jobId){
+function submitWeldingProcedure(){
   const wpsNumber = document.getElementById('wps-number').value.trim();
   const baseMaterial = document.getElementById('wps-material').value.trim();
   if(!wpsNumber && !baseMaterial) return;
   const positions = Array.from(document.querySelectorAll('.wps-position-cb:checked')).map(el=>el.value);
+  const applicableJobIds = Array.from(document.querySelectorAll('.wps-job-cb:checked')).map(el=>el.value);
   const entry = {
-    id: nextId('weldingProcedures', jobId, 'WPS'), jobId,
+    id: nextWeldingId(),
+    category: document.getElementById('wps-category').value.trim(),
     wpsNumber,
     pqrNumber: document.getElementById('wps-pqr').value.trim(),
     process: document.getElementById('wps-process').value,
     baseMaterial,
     thicknessRange: document.getElementById('wps-thickness').value.trim(),
     positions,
+    applicableJobIds,
     notes: document.getElementById('wps-notes').value.trim(),
     date: todayStr(),
     attachments: []
   };
   commit({type:'addWeldingProcedure', entry});
+  renderWeldingLibraryPage();
 }
 function deleteWeldingProcedure(id){
   if(!confirm("Delete this welding procedure? This can't be undone.")) return;
+  weldingLibrarySelection.delete(id);
   commit({type:'deleteWeldingProcedure', id});
   closeModal();
+  renderWeldingLibraryPage();
 }
 function openWeldingDetail(id){
   const w = state.weldingProcedures.find(x=>x.id===id);
@@ -3429,13 +3546,16 @@ function openWeldingDetail(id){
 }
 function weldingDetailHTML(w){
   const positions = (w.positions||[]).join(', ') || '—';
+  const jobNames = (w.applicableJobIds||[]).map(id=>{ const j=state.jobs.find(x=>x.id===id); return j?j.name:null; }).filter(Boolean);
   return `<div class="modal" style="max-width:600px;">
-    <h3>${esc(w.wpsNumber||'(no WPS #)')}</h3><p class="sub">${esc(w.process||'—')}${w.date?` · ${w.date}`:''}</p>
+    <h3>${esc(w.wpsNumber||'(no WPS #)')}</h3><p class="sub">${w.category?esc(w.category):'Uncategorized'}${w.date?` · ${w.date}`:''}</p>
     <div class="log-entry" style="margin-bottom:14px;">
       ${w.pqrNumber?`<div><strong>PQR #:</strong> ${esc(w.pqrNumber)}</div>`:''}
+      <div><strong>Process:</strong> ${esc(w.process||'—')}</div>
       <div><strong>Base material:</strong> ${esc(w.baseMaterial||'—')}</div>
       <div><strong>Thickness range:</strong> ${esc(w.thicknessRange||'—')}</div>
       <div><strong>Position(s) qualified:</strong> ${esc(positions)}</div>
+      <div><strong>Applies to:</strong> ${jobNames.length?esc(jobNames.join(', ')):'General reference (no specific job tagged)'}</div>
       ${w.notes?`<div style="margin-top:6px;">${esc(w.notes)}</div>`:''}
     </div>
     <div class="field"><label>Documents</label>
@@ -3482,6 +3602,68 @@ function removeWeldingAttachment(event, idx){
   if(!id) return;
   commit({type:'removeWeldingAttachment', id, index: idx});
   refreshWeldingDetail(id);
+}
+/* ---- Download selected welding procedures: "individually" triggers a
+   separate browser download for every attached document across the
+   selection (staggered slightly so the browser doesn't treat them as a
+   popup flood); "package" bundles everything into one .zip (via JSZip,
+   loaded in <head>) plus a manifest.txt listing every selected procedure —
+   including ones with no document attached yet, so a GC submittal package
+   always documents full scope even before every scan is in hand. ---- */
+function dataUrlToUint8Array(dataUrl){
+  const base64 = dataUrl.split(',')[1] || '';
+  const bin = atob(base64);
+  const arr = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+function sanitizeWeldingFileName(name){
+  return String(name||'file').replace(/[\\/:*?"<>|]/g, '-');
+}
+async function downloadWeldingSelected(mode){
+  const items = state.weldingProcedures.filter(w=>weldingLibrarySelection.has(w.id));
+  if(!items.length) return;
+  if(mode==='individual'){
+    let any = false;
+    for(const w of items){
+      for(const a of (w.attachments||[])){
+        any = true;
+        const link = document.createElement('a');
+        link.href = a.dataUrl; link.download = a.name;
+        document.body.appendChild(link); link.click(); link.remove();
+        await new Promise(r=>setTimeout(r, 250));
+      }
+    }
+    if(!any) alert("None of the selected procedures have a document attached yet — open one and attach its WPS/PQR document first.");
+    return;
+  }
+  if(typeof JSZip === 'undefined'){ alert('Could not load the zip library — check your connection and try again.'); return; }
+  const zip = new JSZip();
+  const manifestLines = [`Welding Procedures package — ${todayStr()}`, ''];
+  let fileCount = 0;
+  items.forEach(w=>{
+    const folder = sanitizeWeldingFileName(`${w.wpsNumber||w.id}${w.category?' - '+w.category:''}`);
+    manifestLines.push(`${w.wpsNumber||w.id} — ${w.category||'Uncategorized'}`);
+    manifestLines.push(`  Process: ${w.process||'—'} | Base material: ${w.baseMaterial||'—'} | Thickness: ${w.thicknessRange||'—'} | Positions: ${(w.positions||[]).join(', ')||'—'}`);
+    if(w.pqrNumber) manifestLines.push(`  PQR #: ${w.pqrNumber}`);
+    if((w.attachments||[]).length){
+      w.attachments.forEach(a=>{
+        zip.file(`${folder}/${sanitizeWeldingFileName(a.name)}`, dataUrlToUint8Array(a.dataUrl));
+        fileCount++;
+      });
+    } else {
+      manifestLines.push(`  (no document attached yet)`);
+    }
+    manifestLines.push('');
+  });
+  zip.file('manifest.txt', manifestLines.join('\n'));
+  const blob = await zip.generateAsync({type:'blob'});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = `Welding-Procedures-Package-${todayStr()}.zip`;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+  if(!fileCount) alert("Package downloaded with a manifest listing the selected procedures — none had a document attached yet, so add those from each procedure's Open button when ready.");
 }
 
 /* ---- Water Testing: glazing-specific water test schedule/log, plus a place to
@@ -4149,7 +4331,6 @@ function renderJob(){
   const greenSheets = state.greenSheets.filter(x=>x.jobId===job.id);
   const greenSheetQuotes = state.greenSheetQuotes.filter(x=>x.jobId===job.id);
   const safetyDocs = state.safetyDocs.filter(x=>x.jobId===job.id);
-  const weldingProcedures = state.weldingProcedures.filter(x=>x.jobId===job.id);
   const waterTests = state.waterTests.filter(x=>x.jobId===job.id);
   const elevationMarkups = state.elevationMarkups.filter(x=>x.jobId===job.id);
   const equipmentLog = state.equipmentLog.filter(x=>x.jobId===job.id);
@@ -4186,7 +4367,6 @@ function renderJob(){
   if(ui.tab==='schedule') body = renderSchedule(job, tasks, issues, ganttLogs, procurement, scheduleUpdates, scheduleFieldNotes, gcCommLog);
   if(ui.tab==='procurement') body = renderProcurement(job, procurement);
   if(ui.tab==='safety') body = renderSafetyDocs(job, safetyDocs);
-  if(ui.tab==='welding') body = renderWelding(job, weldingProcedures);
   if(ui.tab==='watertest') body = renderWaterTesting(job, waterTests, elevationMarkups);
   if(ui.tab==='notes') body = renderNotes(notes);
   if(ui.tab==='meetingminutes') body = renderMeetingMinutes(job, meetingMinutes);
@@ -4224,7 +4404,6 @@ function renderJob(){
         {key:'schedule', label:'Field Schedule', count:delayedTasks},
         {key:'procurement', label:'Procurement', count:openProc},
         {key:'safety', label:'Safety Docs'},
-        {key:'welding', label:'Welding Procedures'},
         {key:'watertest', label:'Water Testing', count:openWaterTests},
         {key:'notes', label:'Notes'},
         {key:'meetingminutes', label:'Meeting Minutes'},
@@ -10372,6 +10551,7 @@ function createCOFromIssue(issueId){
 function render(){
   if(ui.view==='home') renderHome();
   else if(ui.view==='standards') renderStandardsPage();
+  else if(ui.view==='weldingLibrary') renderWeldingLibraryPage();
   else if(ui.view==='postit') renderPostitPage();
   else if(ui.view==='map') renderMapPage();
   else renderJob();
@@ -10419,6 +10599,7 @@ async function boot(){
   }
   state = migratePostitTypes(migrateAssignedPMs(Object.assign(defaultState(), loaded || {})));
   const projectedCostsMigrated = migrateProjectedCosts();
+  const weldingLibraryMigrated = migrateWeldingLibrary();
   if(verifiedIdentity && verifiedIdentity.matched && verifiedIdentity.teamMemberId){
     // Real, verified identity replaces the self-picked "You" dropdown.
     currentTeamMemberId = verifiedIdentity.teamMemberId;
@@ -10428,7 +10609,7 @@ async function boot(){
   render();
   if(loaded === null){
     setSavePill('offline', "Couldn't reach the server — changes stay in this tab until it's back");
-  } else if(pendingQueue.length || projectedCostsMigrated){
+  } else if(pendingQueue.length || projectedCostsMigrated || weldingLibraryMigrated){
     doPersist();
   } else {
     setSavePill('saved', 'All changes saved');
