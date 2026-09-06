@@ -371,6 +371,11 @@
   .jhm .n.ok{ color:var(--good); }
   .jhm .n.warn{ color:var(--amber); }
   .jhm .n.over{ color:var(--safety); }
+  .job-gcnum{ background:#F1EFE8; border-radius:6px; padding:6px 8px; margin-bottom:12px; }
+  .job-gcnum .l{ font-size:9.5px; text-transform:uppercase; color:var(--text-muted); letter-spacing:.05em; font-weight:700; margin-bottom:2px; }
+  .job-gcnum input{ width:100%; border:none; background:transparent; padding:1px 0; font-family:var(--mono); font-weight:700; font-size:12.5px; color:var(--ink); }
+  .job-gcnum input:focus{ outline:1.5px solid var(--steel-dim); border-radius:4px; padding:1px 4px; margin:0 -4px; }
+  .job-gcnum input::placeholder{ font-family:var(--sans); font-weight:400; color:var(--text-muted); }
   .job-stats{ display:flex; gap:14px; border-top:1px solid var(--line); padding-top:10px; margin-top:2px;}
   .job-stat{ text-align:left; }
   .job-stat .n{ font-family:var(--mono); font-weight:700; font-size:17px; }
@@ -799,12 +804,6 @@
     <button class="ext-btn ext-btn-soon" onclick="toggleExtensionInfo('teams', this)" title="Microsoft Teams — coming soon">
       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-4 4v-4H6a2 2 0 0 1-2-2V6Z"/></svg>
       Microsoft Teams<span class="ext-soon-badge">Soon</span>
-    </button>
-  </div>
-  <div class="ext-btn-wrap">
-    <button class="ext-btn ext-btn-soon" onclick="toggleExtensionInfo('email', this)" title="Email — coming soon">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z"/><path d="m3.5 7 8.5 6 8.5-6"/></svg>
-      Email<span class="ext-soon-badge">Soon</span>
     </button>
   </div>
   <div class="ext-dropdown" id="ext-dropdown" hidden></div>
@@ -2847,10 +2846,6 @@ function renderHome(){
     const openCo = openCount(state.cos, j.id, CO_OPEN_DONE_STATES);
     const openIss = openCount(state.issues, j.id, ['Converted']);
     const openReq = openCount(state.requests, j.id, ['Closed']);
-    const usedField = state.hours.filter(h=>h.jobId===j.id).reduce((s,h)=>s+(Number(h.field)||0),0);
-    const usedShop = state.hours.filter(h=>h.jobId===j.id).reduce((s,h)=>s+(Number(h.shop)||0),0);
-    const fieldCls = hoursPctClass(usedField, j.bidHoursField);
-    const shopCls = hoursPctClass(usedShop, j.bidHoursShop);
     return `
     <div class="job-card" onclick="openJob('${j.id}')">
       <button class="job-card-edit-btn" ${disabledAttr()} onclick="event.stopPropagation(); openBudgetModal('${j.id}')" title="Edit job details">${icon('edit')}</button>
@@ -2858,9 +2853,9 @@ function renderHome(){
       <h3>${esc(j.name)}</h3>
       <div class="job-meta">${esc(j.gc || 'No GC listed')}</div>
       ${jobCardAssignHTML(j)}
-      <div class="job-hours-mini">
-        <div class="jhm"><div class="l">Field</div><div class="n ${fieldCls}">${usedField}${j.bidHoursField?'/'+j.bidHoursField:''}h</div></div>
-        <div class="jhm"><div class="l">Shop</div><div class="n ${shopCls}">${usedShop}${j.bidHoursShop?'/'+j.bidHoursShop:''}h</div></div>
+      <div class="job-gcnum" onclick="event.stopPropagation()">
+        <div class="l">GC Project #</div>
+        <input type="text" value="${esc(j.gcProjectNumber||'')}" placeholder="e.g. 24-1187" ${disabledAttr()} onchange="updateJobGcProjectNumber('${j.id}', this.value)">
       </div>
       <div class="job-stats">
         <div class="job-stat"><div class="n ${openRfi>0?'warn':''}">${openRfi}</div><div class="l">Open RFIs</div></div>
@@ -4576,7 +4571,7 @@ function addSubmittalItemsToSpec(specId, items){
   const entries = toAdd.map((item,i)=>({
     id: `${ui.jobId}-${secLabel}-${String(baseN+i+1).padStart(3,'0')}`, jobId: ui.jobId, specId,
     description: item, dateSubmitted: '', status: 'Draft', attachments: [],
-    to: job ? (job.gc||'') : '', jobNo: ui.jobId, re: `${secLabel}${spec&&spec.title?' — '+spec.title:''}`, attn: '',
+    to: job ? (job.gc||'') : '', jobNo: (job&&job.gcProjectNumber)||ui.jobId, re: `${secLabel}${spec&&spec.title?' — '+spec.title:''}`, attn: '',
     sendMethod: [], viaMethod: [], itemTypes: [], lineItems: [{copies:'', date:'', no:'', description:item}],
     transmittedPurpose: [], bidsDueOn: '', remarks: '', sentBy: currentUserName || ''
   }));
@@ -8468,6 +8463,7 @@ function modalHTML(type){
       </div>
       <div class="field"><label>Job name</label><input id="f-name" placeholder="e.g. Riverpoint Tower"></div>
       <div class="field"><label>GC / Client</label><input id="f-gc" placeholder="e.g. Turner Construction"></div>
+      <div class="field"><label>GC Project # (optional)</label><input id="f-gcprojno" placeholder="e.g. 24-1187"></div>
       <div class="field"><label>Project address</label><input id="f-address" placeholder="Street, city"></div>
       <div class="field-row">
         <div class="field"><label>Bid hours — Field</label><input type="number" id="f-bhf" placeholder="0"></div>
@@ -8492,6 +8488,7 @@ function modalHTML(type){
           <select id="f-status">${['Active','On Hold','Closed Out'].map(s=>`<option ${((job.status||'Active')===s)?'selected':''}>${s}</option>`).join('')}</select></div>
       </div>
       <div class="field"><label>GC / Client</label><input id="f-gc" value="${esc(job.gc||'')}" placeholder="e.g. Turner Construction"></div>
+      <div class="field"><label>GC Project # (optional)</label><input id="f-gcprojno" value="${esc(job.gcProjectNumber||'')}" placeholder="e.g. 24-1187"></div>
       <div class="field"><label>Project address</label><input id="f-address" value="${esc(job.address||'')}" placeholder="Street, city"></div>
       <div class="field-row">
         <div class="field"><label>Bid hours — Field</label><input type="number" id="f-bhf" value="${job.bidHoursField!=null?job.bidHoursField:''}" placeholder="0"></div>
@@ -8609,7 +8606,7 @@ function modalHTML(type){
         <div class="field"><label>Date</label><input type="date" id="f-date" value="${todayStr()}"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Job No.</label><input id="f-jobno" value="${esc(ui.jobId)}"></div>
+        <div class="field"><label>Job No.</label><input id="f-jobno" value="${esc((job&&job.gcProjectNumber)||ui.jobId)}"></div>
         <div class="field"><label>Attn</label><input id="f-attn" placeholder="Contact name"></div>
       </div>
       <div class="field"><label>Re</label><input id="f-re" value="${esc(secLabel)}${spec&&spec.title?esc(' — '+spec.title):''}"></div>
@@ -9552,7 +9549,7 @@ function submitPackageSubmittal(){
     id: nextPackageSubmittalId(ui.jobId), jobId: ui.jobId, specId: null,
     isPackage: true, packageItemIds: ids,
     description: desc, dateSubmitted: '', status: 'Draft', attachments: [],
-    to: job ? (job.gc||'') : '', jobNo: ui.jobId, re: desc, attn: '',
+    to: job ? (job.gc||'') : '', jobNo: (job&&job.gcProjectNumber)||ui.jobId, re: desc, attn: '',
     sendMethod: [], viaMethod: [], itemTypes: [], lineItems,
     transmittedPurpose: [], bidsDueOn: '', remarks: '', sentBy: currentUserName || ''
   };
@@ -10191,6 +10188,7 @@ function submitJob(){
   const name = document.getElementById('f-name').value.trim();
   const status = document.getElementById('f-status').value;
   const gc = document.getElementById('f-gc').value.trim();
+  const gcProjectNumber = document.getElementById('f-gcprojno').value.trim();
   const address = document.getElementById('f-address').value.trim();
   const bhf = document.getElementById('f-bhf').value;
   const bhs = document.getElementById('f-bhs').value;
@@ -10199,7 +10197,7 @@ function submitJob(){
   if(state.jobs.some(j=>j.id===id)) return showErr('That Job ID is already in use.');
   if(!name) return showErr('Job name is required.');
   commit({type:'addJob', job:{
-    id, name, status, gc, address,
+    id, name, status, gc, gcProjectNumber, address,
     bidHoursField: bhf===''?null:Number(bhf),
     bidHoursShop: bhs===''?null:Number(bhs),
     // Job creation keeps its single "Assign PM" picker for the initial pick
@@ -10228,6 +10226,7 @@ function submitBudget(){
     patch.name = name;
     patch.status = document.getElementById('f-status').value;
     patch.gc = document.getElementById('f-gc').value.trim();
+    patch.gcProjectNumber = document.getElementById('f-gcprojno').value.trim();
     patch.address = document.getElementById('f-address').value.trim();
   }
   const bhf = document.getElementById('f-bhf').value;
@@ -10709,6 +10708,16 @@ function removeJobPM(jobId, pmId){
   if(!job) return;
   const current = job.assignedPMs || [];
   commit({type:'updateJob', id: jobId, patch:{assignedPMs: current.filter(id=>id!==pmId)}});
+}
+// GC Project # lives right on the job card (the space that used to show
+// Field/Shop hours used-to-date — those are still tracked via the Hours tab
+// and Job settings, just no longer duplicated as a home-screen mini-stat) so
+// it's always in view, and so new submittals can default their transmittal's
+// "Job No." to the GC's own project number instead of Nucleus's internal
+// 4-letter job code — see jobNo: in addSubmittalItemsToSpec,
+// submitPackageSubmittal, and the "Job No." field in the submittal modal.
+function updateJobGcProjectNumber(jobId, value){
+  commit({type:'updateJob', id: jobId, patch: {gcProjectNumber: value.trim()}});
 }
 function addJobForeman(jobId, foremanId){
   if(!foremanId) return;
@@ -11600,7 +11609,6 @@ function teamDropdownEscHandler(e){ if(e.key==='Escape') closeTeamDropdown(); }
 const EXT_INFO = {
   bridge: { title: 'Bridge Connect', body: "Not linked yet — this button is ready to go the moment there's a Bridge link to point it at. Ask your App Manager if you'd like it wired up." },
   teams: { title: 'Microsoft Teams', body: "Coming soon — a Teams connection isn't wired up yet." },
-  email: { title: 'Email', body: "Coming soon — an email connection isn't wired up yet." },
 };
 function toggleExtensionInfo(key, btn){
   const dd = document.getElementById('ext-dropdown');
