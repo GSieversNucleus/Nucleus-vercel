@@ -2525,6 +2525,11 @@ function applyOp(op, s){
     case 'addElevationMarkups': s.elevationMarkups.push(...op.entries); break;
     case 'deleteElevationMarkup': s.elevationMarkups = s.elevationMarkups.filter(x=>x.id!==op.id); break;
     case 'addGreenSheetQuote': s.greenSheetQuotes.push(op.entry); break;
+    case 'updateGreenSheetQuote': {
+      const q = s.greenSheetQuotes.find(x=>x.id===op.id);
+      if(q) Object.assign(q, op.patch);
+      break;
+    }
     case 'deleteGreenSheetQuote': s.greenSheetQuotes = s.greenSheetQuotes.filter(x=>x.id!==op.id); break;
     case 'addGreenSheetQuoteAttachments': {
       const q = s.greenSheetQuotes.find(x=>x.id===op.id);
@@ -5282,7 +5287,6 @@ function applyGreenSheetHoursToJob(jobId, totalField, totalShop){
 }
 function renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes){
   greenSheetQuotes = greenSheetQuotes || [];
-  const totalBudget = greenSheets.reduce((s,g)=>s+Number(g.budget||0),0);
   const rows = greenSheets.slice().sort((a,b)=>(a.system||'').localeCompare(b.system||'', undefined, {numeric:true})).map(g=>{
     const spent = g.costCode ? invoices.filter(i=>i.costCode===g.costCode).reduce((s,i)=>s+Number(i.amount||0),0) : null;
     const remaining = spent!=null ? Number(g.budget||0) - spent : null;
@@ -5314,6 +5318,7 @@ function renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes){
       <td data-label="Date">${q.date||'—'}</td>
       <td data-label="Notes">${esc(q.notes||'—')}</td>
       <td data-label="Docs"><button class="btn sm secondary" onclick="openGSQuoteDetail('${q.id}')">${icon('paperclip')}${docCount?' '+docCount:''}</button></td>
+      <td data-label="Order">${q.convertedToProcurementId ? `<button class="btn sm secondary" onclick="openProcurementDetail('${q.convertedToProcurementId}')">${icon('truck')} View order</button>` : (readOnly?'—':`<button class="btn sm safety" onclick="convertQuoteToOrder('${q.id}')">${icon('truck')} Convert to order</button>`)}</td>
       <td data-label=""><button class="btn sm secondary" ${disabledAttr()} onclick="deleteGreenSheetQuote('${q.id}')">${icon('trash')}</button></td>
     </tr>`;
   }).join('');
@@ -5330,7 +5335,6 @@ function renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes){
     ${renderGreenSheetRundown(job)}
 
     <div class="section-title" style="margin-top:22px;">Budget by system / scope</div>
-    <div class="co-summary" style="margin-bottom:14px;"><div class="row total"><span>Total budgeted (all systems)</span><span>${fmtMoney(totalBudget)}</span></div></div>
     ${readOnly ? '' : `
     <div class="co-summary" style="margin-bottom:14px;">
       <div class="field-row">
@@ -5361,10 +5365,17 @@ function renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes){
         <div class="field"><label>Date</label><input type="date" id="gsq-date" value="${todayStr()}"></div>
       </div>
       <div class="field"><label>Notes</label><input id="gsq-notes" placeholder="Scope covered, exclusions, lead time, etc."></div>
+      <div class="field"><label>Quote PDF (optional — drop it in now, or attach later from Docs)</label>
+        <div class="photo-drop" onclick="document.getElementById('gsq-doc-input').click()">${icon('fileUpload')}Drop the quote PDF here, or tap to browse</div>
+        <input type="file" id="gsq-doc-input" accept="application/pdf" multiple style="display:none;" onchange="handleQuoteDraftFileSelect(event)">
+        <div id="gsq-doc-list" style="margin-top:8px;">${quoteDraftAttachments.length?quoteDraftAttachments.map((a,i)=>`
+          <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+          <button type="button" class="attach-remove" onclick="removeQuoteDraftAttachment(${i})" aria-label="Remove attachment">&times;</button></div>`).join(''):''}</div>
+      </div>
       <button class="btn sm safety" onclick="submitGreenSheetQuote('${job.id}')">${icon('plus')} Add quote</button>
     </div>`}
     ${greenSheetQuotes.length===0 ? emptyBlock('fileInvoice','No quotes logged yet — add one per bid received and tag it with a Green Sheet code to compare against budget.') : `
-    <table><thead><tr><th>Green Sheet code</th><th>Vendor / supplier</th><th>Quoted amount</th><th>Date</th><th>Notes</th><th>Docs</th><th></th></tr></thead>
+    <table><thead><tr><th>Green Sheet code</th><th>Vendor / supplier</th><th>Quoted amount</th><th>Date</th><th>Notes</th><th>Docs</th><th>Order</th><th></th></tr></thead>
     <tbody>${quoteRows}</tbody></table>`}`;
 }
 function renderContract(job){
@@ -5596,8 +5607,10 @@ function submitGreenSheetQuote(jobId){
     amount: Number(amount),
     date: document.getElementById('gsq-date').value || todayStr(),
     notes: document.getElementById('gsq-notes').value.trim(),
-    attachments: []
+    attachments: quoteDraftAttachments.slice(),
+    convertedToProcurementId: null
   };
+  quoteDraftAttachments = [];
   commit({type:'addGreenSheetQuote', entry});
 }
 function deleteGreenSheetQuote(id){
@@ -6372,7 +6385,7 @@ function taskDetailHTML(t){
     <h3>${esc(t.name)}</h3><p class="sub">${esc(t.trade||'—')} · ${t.manpower||0} crew · ${t.duration||0} day${t.duration===1?'':'s'}</p>
     <div class="field-row">
       <div class="field"><label>Manpower</label><input type="number" id="td-manpower" min="0" value="${t.manpower||0}" ${disabledAttr()} onchange="updateTaskField('${t.id}','manpower',Number(this.value)||0)"></div>
-      <div class="field"><label>Duration (days)</label><input type="number" id="td-duration" min="1" value="${t.duration||1}" ${disabledAttr()} onchange="updateTaskField('${t.id}','duration',Number(this.value)||1)"></div>
+      <div class="field"><label>Duration (days)</label><input type="number" id="td-duration" min="1" value="${t.duration||1}" ${disabledAttr()} onchange="updateTaskDuration('${t.id}', this.value)"></div>
     </div>
     <div class="field-row">
       <div class="field"><label>Scheduled start</label><input type="date" id="td-current" value="${t.currentStart||''}" ${disabledAttr()} onchange="rescheduleTask('${t.id}', this.value)"></div>
@@ -6434,6 +6447,19 @@ function refreshTaskDetail(taskId){
 }
 function updateTaskField(taskId, field, value){
   commit({type:'updateTask', id:taskId, patch:{[field]:value}});
+  refreshTaskDetail(taskId);
+}
+// Greg: "automatically add the end date if I put in a duration" — changing
+// duration on an existing task recomputes Due date from its current
+// scheduled start the same way the Add-task modal does (see
+// recomputeTaskDueDate below), so he never has to count out days by hand.
+// Due date stays a normal editable field afterward if he wants to override it.
+function updateTaskDuration(taskId, value){
+  const duration = Number(value) || 1;
+  const t = state.schedule.find(x=>x.id===taskId);
+  const patch = {duration};
+  if(t && t.currentStart) patch.dueDate = addDaysStr(t.currentStart, duration-1);
+  commit({type:'updateTask', id:taskId, patch});
   refreshTaskDetail(taskId);
 }
 function rescheduleTask(taskId, newDate){
@@ -7260,7 +7286,7 @@ function renderElevations(elevations){
           <div class="spec-section">${esc(el.drawingRef||'No drawing callout')}</div>
           <div class="spec-title">${esc(el.name||'Untitled elevation')}</div>
           ${el.notes?`<div class="issue-meta">${esc(el.notes)}</div>`:''}
-          <div class="issue-meta" style="margin-top:4px;">Scheduled start ${el.scheduledStart||'—'} · Actual start ${el.actualStart||'not started'}
+          <div class="issue-meta" style="margin-top:4px;">Scheduled start ${el.scheduledStart||'—'}${el.scheduledEnd?' → '+el.scheduledEnd:''} · Actual start ${el.actualStart||'not started'}
             ${delay!==0?` · <span class="${delay>0?'hrs-pct over':'hrs-pct ok'}">${delay>0?delay+'d late':Math.abs(delay)+'d early'}</span>`:''}</div>
           ${(el.projectedHours!=null || el.actualHours!=null)?`<div class="issue-meta">Hours: ${el.projectedHours!=null?el.projectedHours+'h projected':'no projection'}${el.actualHours!=null?' · '+el.actualHours+'h actual':''}</div>`:''}
           ${el.predecessorReq?`<div class="issue-meta">${icon('clipboardList')} Predecessor: ${esc(el.predecessorReq)}</div>`:''}
@@ -7367,7 +7393,11 @@ function elevationDetailHTML(el){
   return `<div class="modal" style="max-width:640px;">
     <h3>${esc(el.name||'Untitled elevation')}</h3><p class="sub">${esc(el.drawingRef||'No drawing callout')}</p>
     <div class="field-row">
-      <div class="field"><label>Scheduled start</label><input type="date" id="elev-detail-sched" value="${el.scheduledStart||''}" ${disabledAttr()} onchange="updateElevationField('${el.id}','scheduledStart',this.value||null)"></div>
+      <div class="field"><label>Scheduled start</label><input type="date" id="elev-detail-sched" value="${el.scheduledStart||''}" ${disabledAttr()} onchange="updateElevationScheduling('${el.id}','scheduledStart',this.value||null)"></div>
+      <div class="field"><label>Duration (days)</label><input type="number" min="1" id="elev-detail-duration" value="${el.duration??''}" ${disabledAttr()} placeholder="days" onchange="updateElevationScheduling('${el.id}','duration',this.value===''?null:(Number(this.value)||null))"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Scheduled end</label><input type="date" id="elev-detail-schedend" value="${el.scheduledEnd||''}" ${disabledAttr()} onchange="updateElevationField('${el.id}','scheduledEnd',this.value||null)"></div>
       <div class="field"><label>Actual start</label><input type="date" id="elev-detail-actual" value="${el.actualStart||''}" ${disabledAttr()} onchange="updateElevationField('${el.id}','actualStart',this.value||null)"></div>
     </div>
     ${delay!==0?`<div class="co-summary" style="margin-bottom:14px;"><div class="row total"><span>Delay vs. scheduled</span><span class="${delay>0?'hrs-pct over':'hrs-pct ok'}">${delay>0?delay+' day'+(delay===1?'':'s')+' late':Math.abs(delay)+' day'+(Math.abs(delay)===1?'':'s')+' early'}</span></div></div>`:''}
@@ -7464,6 +7494,19 @@ function updateElevationField(elevId, field, value){
   commit({type:'updateElevation', id:elevId, patch:{[field]:value}});
   refreshElevationDetail(elevId);
 }
+// Greg: "automatically add the end date if I put in a duration" — changing
+// either Scheduled start or Duration here recomputes Scheduled end the same
+// way the Add-elevation modal does at creation. Scheduled end stays its own
+// normal editable field (via updateElevationField above) for a manual override.
+function updateElevationScheduling(elevId, field, value){
+  const el = state.elevations.find(x=>x.id===elevId);
+  const patch = {[field]: value};
+  const start = field==='scheduledStart' ? value : (el && el.scheduledStart);
+  const duration = field==='duration' ? value : (el && el.duration);
+  if(start && duration) patch.scheduledEnd = addDaysStr(start, Number(duration)-1);
+  commit({type:'updateElevation', id:elevId, patch});
+  refreshElevationDetail(elevId);
+}
 async function handleElevationPhotoSelect(e, elevId){
   const files = Array.from(e.target.files);
   const dateEl = document.getElementById('elev-photo-date');
@@ -7557,6 +7600,7 @@ function renderProcurement(job, items){
       <td data-label="Vendor">${esc(p.vendor||'—')}</td>
       <td data-label="Cost code">${p.costCode?`${esc(p.costCode)} — ${esc(costCodeLabel(p.costCode))}`:'—'}</td>
       <td data-label="Order date">${p.orderDate||'—'}</td>
+      <td data-label="Expected at shop">${p.expectedAtShop||'—'}</td>
       <td data-label="Needed by">${p.neededBy||'—'}</td>
       <td data-label="Status">
         <select ${disabledAttr()} onchange="updateProcurementStatus('${p.id}', this.value)">
@@ -7569,14 +7613,17 @@ function renderProcurement(job, items){
     </tr>`;
   }).join('');
   return `
-    <div class="panel-head"><h3>Procurement — materials on order</h3><button class="btn sm safety" ${disabledAttr()} onclick="openModal('procurement')">${icon('truck')} Add material order</button></div>
+    <div class="panel-head"><h3>Procurement — materials on order</h3><button class="btn sm safety" ${disabledAttr()} onclick="openProcurementModal()">${icon('truck')} Add material order</button></div>
     ${items.length===0 ? emptyBlock('truck','Nothing tracked yet — add a material order with its needed-by date to see it on the home calendar and look-ahead.') : `
-    <table><thead><tr><th>Item</th><th>Vendor</th><th>Cost code</th><th>Order date</th><th>Needed by</th><th>Status</th><th></th><th>Docs</th><th></th></tr></thead>
+    <table><thead><tr><th>Item</th><th>Vendor</th><th>Cost code</th><th>Order date</th><th>Expected at shop</th><th>Needed by</th><th>Status</th><th></th><th>Docs</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table>`}
     ${renderProcurementCalendar(items)}`;
 }
 function updateProcurementStatus(id, status){
   commit({type:'updateProcurement', id, patch:{status}});
+}
+function updateProcurementField(id, field, value){
+  commit({type:'updateProcurement', id, patch:{[field]: value}});
 }
 function deleteProcurement(id){
   if(!confirm('Remove this material order?')) return;
@@ -8180,6 +8227,32 @@ function openBudgetModal(jobId){
   ui.jobId = jobId;
   openModal('budget');
 }
+// Greg: "add in a button to make it convert to an order" on a logged Quote,
+// tying into Procurement. Rather than silently fabricating a material order
+// from just a vendor/amount (a quote has no Item description or Needed-by
+// date — the two things a procurement row actually needs), this pre-fills
+// the "Add material order" modal with what the quote DOES know (vendor, cost
+// code, and a note with the quoted amount/date) and lets Greg fill in the
+// rest and confirm — same idea as how a Cost Impact pre-fills a CO via
+// coIssuePrefill below. Once he submits, the quote is marked
+// convertedToProcurementId so it can't be converted twice by accident and the
+// Quotes row can link straight to the resulting order.
+let procurementPrefill = null;
+function openProcurementModal(){
+  procurementPrefill = null;
+  openModal('procurement');
+}
+function convertQuoteToOrder(quoteId){
+  const q = state.greenSheetQuotes.find(x=>x.id===quoteId);
+  if(!q) return;
+  procurementPrefill = {
+    vendor: q.vendor || '',
+    costCode: q.costCode || '',
+    notes: `From quote ${q.id}${q.vendor?' — '+q.vendor:''} — quoted ${fmtMoney(q.amount)}${q.date?' on '+q.date:''}`,
+    quoteId: q.id
+  };
+  openModal('procurement');
+}
 /* ---- Full itemized CO request, optionally built from a priced Cost Impact.
    "New CO request" (from the Change Orders tab) opens it blank; "Change order"
    (from a Costed cost impact) opens the same form with the scope of work and a
@@ -8461,11 +8534,11 @@ function modalHTML(type){
         <div class="field"><label>Manpower</label><input type="number" id="f-manpower" min="0" placeholder="# of workers"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Duration (days)</label><input type="number" id="f-duration" min="1" placeholder="days"></div>
-        <div class="field"><label>Original start date</label><input type="date" id="f-start" value="${todayStr()}"></div>
+        <div class="field"><label>Duration (days)</label><input type="number" id="f-duration" min="1" placeholder="days" oninput="recomputeTaskDueDate()"></div>
+        <div class="field"><label>Original start date</label><input type="date" id="f-start" value="${todayStr()}" onchange="recomputeTaskDueDate()"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Due date (optional)</label><input type="date" id="f-duedate"></div>
+        <div class="field"><label>Due date (auto-filled from duration — override if needed)</label><input type="date" id="f-duedate"></div>
         <div class="field"><label>Priority</label>
           <select id="f-priority">${PRIORITIES.map(p=>`<option ${p==='Medium'?'selected':''}>${p}</option>`).join('')}</select>
         </div>
@@ -8572,7 +8645,10 @@ function modalHTML(type){
       <h3>Add elevation</h3><p class="sub">${ui.jobId}</p>
       <div class="field"><label>Elevation name / tag</label><input id="f-name" placeholder="e.g. Elevation A — North Curtain Wall"></div>
       <div class="field"><label>Shop drawing callout</label><input id="f-drawingref" placeholder="e.g. Sheet A-501, Callout 3"></div>
-      <div class="field"><label>Scheduled start date</label><input type="date" id="f-schedstart"></div>
+      <div class="field-row">
+        <div class="field"><label>Scheduled start date</label><input type="date" id="f-schedstart"></div>
+        <div class="field"><label>Duration (days, optional)</label><input type="number" id="f-duration" min="1" placeholder="days"></div>
+      </div>
       <div class="field"><label>Predecessor prior to commencing work</label><input id="f-predecessor" placeholder="e.g. Caulk crew must finish, deck must be broom clean"></div>
       <div class="field"><label>Equipment planned</label><input id="f-equipment" placeholder="e.g. 2 boom lifts, 1 forklift, swing stage"></div>
       <div class="field"><label>Notes (optional)</label><textarea id="f-notes" placeholder="Anything else worth tracking"></textarea></div>
@@ -8583,17 +8659,18 @@ function modalHTML(type){
   }
   if(type==='procurement'){
     return `<div class="modal">
-      <h3>Add material order</h3><p class="sub">${ui.jobId} — shows up on the home calendar and look-ahead once it has a needed-by date</p>
+      <h3>Add material order</h3><p class="sub">${ui.jobId}${procurementPrefill?' — converting a quote to a material order':' — shows up on the home calendar and look-ahead once it has a needed-by date'}</p>
       <div class="field"><label>Item / material</label><input id="f-item" placeholder="e.g. Curtain wall glass — Level 3"></div>
       <div class="field-row">
-        <div class="field"><label>Vendor</label><input id="f-vendor" placeholder="Supplier"></div>
-        <div class="field"><label>Cost code</label><select id="f-code"><option value="">None</option>${costCodeOptions()}</select></div>
+        <div class="field"><label>Vendor</label><input id="f-vendor" value="${procurementPrefill?esc(procurementPrefill.vendor):''}" placeholder="Supplier"></div>
+        <div class="field"><label>Cost code</label><select id="f-code"><option value="">None</option>${costCodeOptions(procurementPrefill?procurementPrefill.costCode:'')}</select></div>
       </div>
       <div class="field-row">
         <div class="field"><label>Order date</label><input type="date" id="f-orderdate"></div>
-        <div class="field"><label>Needed by</label><input type="date" id="f-neededby"></div>
+        <div class="field"><label>Expected at shop</label><input type="date" id="f-expectedshop"></div>
       </div>
-      <div class="field"><label>Notes (optional)</label><input id="f-notes" placeholder="Lead time, PO #, etc."></div>
+      <div class="field"><label>Needed by (job site)</label><input type="date" id="f-neededby"></div>
+      <div class="field"><label>Notes (optional)</label><input id="f-notes" value="${procurementPrefill?esc(procurementPrefill.notes):''}" placeholder="Lead time, PO #, etc."></div>
       <div class="field"><label>Order confirmation / quote / PO (optional)</label>
         <div class="photo-drop" onclick="document.getElementById('proc-doc-input').click()">${icon('fileUpload')}Tap to attach a document or photo</div>
         <input type="file" id="proc-doc-input" multiple style="display:none;">
@@ -8947,6 +9024,32 @@ function renderAttachList(listId, list, isDraft){
 function removeDraftAttachment(i, listId){
   draftAttachments.splice(i,1);
   renderAttachList(listId, draftAttachments, true);
+}
+// Quotes (Budget and Costs) get their own tiny draft-attachment array rather
+// than sharing the generic one above: the "Add quote" form is an always-on
+// inline section on the tab body (not a modal), so its pending picks need to
+// survive a full renderBudgetCosts() re-render (e.g. from an unrelated
+// commit elsewhere on the page) — reading this array back at render time in
+// renderBudgetCosts does that; a plain isDraft-DOM-patch-only list would go
+// blank on the next re-render instead.
+let quoteDraftAttachments = [];
+async function handleQuoteDraftFileSelect(e){
+  const files = Array.from(e.target.files);
+  for(const file of files){
+    const dataUrl = await readFileAsDataURL(file);
+    const draftSize = quoteDraftAttachments.reduce((n,a)=>n+a.dataUrl.length,0);
+    if(stateBytes(state) + draftSize + dataUrl.length > MAX_STATE_BYTES){
+      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller file.`);
+      continue;
+    }
+    quoteDraftAttachments.push({name:file.name, dataUrl, size:file.size});
+  }
+  e.target.value = '';
+  render();
+}
+function removeQuoteDraftAttachment(i){
+  quoteDraftAttachments.splice(i,1);
+  render();
 }
 
 /* ---- Change order detail view ---- */
@@ -9526,10 +9629,13 @@ function procurementDetailHTML(p){
   return `<div class="modal" style="max-width:600px;">
     <h3>${p.id}</h3><p class="sub">${esc(p.item)}${p.vendor?` · ${esc(p.vendor)}`:''}</p>
     <div class="co-summary" style="margin-bottom:14px;">
-      <div class="row"><span>Cost code</span><span>${p.costCode?`${esc(p.costCode)} — ${esc(costCodeLabel(p.costCode))}`:'—'}</span></div>
-      <div class="row"><span>Order date</span><span>${p.orderDate||'—'}</span></div>
-      <div class="row total"><span>Needed by</span><span>${p.neededBy||'—'}</span></div>
+      <div class="row total"><span>Cost code</span><span>${p.costCode?`${esc(p.costCode)} — ${esc(costCodeLabel(p.costCode))}`:'—'}</span></div>
     </div>
+    <div class="field-row">
+      <div class="field"><label>Order date</label><input type="date" id="proc-detail-orderdate" value="${p.orderDate||''}" ${disabledAttr()} onchange="updateProcurementField('${p.id}','orderDate',this.value||'')"></div>
+      <div class="field"><label>Expected at shop</label><input type="date" id="proc-detail-expectedshop" value="${p.expectedAtShop||''}" ${disabledAttr()} onchange="updateProcurementField('${p.id}','expectedAtShop',this.value||'')"></div>
+    </div>
+    <div class="field"><label>Needed by (job site)</label><input type="date" id="proc-detail-neededby" value="${p.neededBy||''}" ${disabledAttr()} onchange="updateProcurementField('${p.id}','neededBy',this.value||'')"></div>
     <div class="field"><label>Status</label>
       <select ${disabledAttr()} onchange="updateProcurementStatus('${p.id}', this.value)">
         ${['Not Ordered','Ordered','Shipped','Delivered','Delayed'].map(s=>`<option ${p.status===s?'selected':''}>${s}</option>`).join('')}
@@ -9594,6 +9700,19 @@ function submitInvoice(){
   draftAttachments = [];
   commit({type:'addInvoice', entry});
   closeModal();
+}
+// Greg: Add-task modal should auto-fill Due date from Duration + start so he
+// doesn't have to count out days and plug in a date by hand; still a normal
+// editable field afterward if he wants something else.
+function recomputeTaskDueDate(){
+  const durEl = document.getElementById('f-duration');
+  const startEl = document.getElementById('f-start');
+  const dueEl = document.getElementById('f-duedate');
+  if(!durEl || !startEl || !dueEl) return;
+  const dur = Number(durEl.value);
+  const start = startEl.value;
+  if(!start || !dur || dur<1) return;
+  dueEl.value = addDaysStr(start, dur-1);
 }
 function submitTask(){
   const name = document.getElementById('f-name').value.trim();
@@ -9837,6 +9956,9 @@ function submitEngineering(){
 function submitElevation(){
   const name = document.getElementById('f-name').value.trim();
   if(!name) return showErr('Enter an elevation name or tag.');
+  const schedStart = document.getElementById('f-schedstart').value || null;
+  const durVal = document.getElementById('f-duration').value;
+  const duration = durVal==='' ? null : (Number(durVal) || null);
   const entry = {
     id: nextId('elevations', ui.jobId, 'ELV'), jobId: ui.jobId,
     name,
@@ -9845,7 +9967,13 @@ function submitElevation(){
     predecessorReq: document.getElementById('f-predecessor').value.trim(),
     plannedEquipment: document.getElementById('f-equipment').value.trim(),
     majorNotes: '',
-    scheduledStart: document.getElementById('f-schedstart').value || null,
+    scheduledStart: schedStart,
+    duration,
+    // Greg: "automatically add the end date if I put in a duration" — same
+    // idea as Field Schedule tasks (see recomputeTaskDueDate/updateTaskDuration),
+    // applied to elevations since they had no duration/end-date concept at all
+    // before this. Still freely editable afterward from the elevation detail.
+    scheduledEnd: (schedStart && duration) ? addDaysStr(schedStart, duration-1) : null,
     actualStart: null,
     projectedHours: null,
     actualHours: null,
@@ -9865,6 +9993,7 @@ function submitProcurement(){
     vendor: document.getElementById('f-vendor').value.trim(),
     costCode: document.getElementById('f-code').value,
     orderDate: document.getElementById('f-orderdate').value,
+    expectedAtShop: document.getElementById('f-expectedshop').value,
     neededBy: document.getElementById('f-neededby').value,
     notes: document.getElementById('f-notes').value.trim(),
     status: 'Not Ordered',
@@ -9872,6 +10001,10 @@ function submitProcurement(){
   };
   draftAttachments = [];
   commit({type:'addProcurement', entry});
+  if(procurementPrefill && procurementPrefill.quoteId){
+    commit({type:'updateGreenSheetQuote', id: procurementPrefill.quoteId, patch:{convertedToProcurementId: entry.id}});
+  }
+  procurementPrefill = null;
   closeModal();
 }
 function submitJob(){
