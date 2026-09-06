@@ -2395,6 +2395,37 @@ function applyOp(op, s){
       }
       break;
     }
+    case 'backfillGreenSheetLineDetail': {
+      // Fills in the material-line breakdown and Non-Taxable Material total
+      // (see parseGreenSheetMaterialLines / backfillGreenSheetLineDetail
+      // client-side function) for a Green Sheet line that was parsed before
+      // those existed. Re-derived from the doc's own stored dataUrl — the
+      // original uploaded workbook bytes are always kept — so Greg never has
+      // to re-upload anything just to pick up a parser improvement. This is
+      // an automatic re-derivation of data the workbook already had, not a
+      // hand-edit, so unlike updateGreenSheetLine it does NOT set
+      // edited:true and never touches systemNo/systemName/materialTotal or
+      // anything else about the line — only the two fields named here.
+      const jg2 = s.jobs.find(x=>x.id===op.jobId);
+      const doc2 = jg2 && jg2.contractDocs && jg2.contractDocs[op.docIdx];
+      if(doc2){
+        if(!Array.isArray(doc2.greenSheetLines)){
+          doc2.greenSheetLines = [{
+            sheetName: doc2.sheetName || '',
+            systemNo: doc2.systemNo || '',
+            systemName: doc2.systemName || '',
+            materialTotal: doc2.materialTotal!=null ? doc2.materialTotal : null,
+            shopHours: doc2.shopHours!=null ? doc2.shopHours : null,
+            fieldHours: doc2.fieldHours!=null ? doc2.fieldHours : null,
+          }];
+        }
+        if(doc2.greenSheetLines[op.lineIdx]){
+          doc2.greenSheetLines[op.lineIdx].materialLines = op.materialLines;
+          if(op.materialTotalNonTaxable!==undefined) doc2.greenSheetLines[op.lineIdx].materialTotalNonTaxable = op.materialTotalNonTaxable;
+        }
+      }
+      break;
+    }
     case 'addGreenSheet': s.greenSheets.push(op.entry); break;
     case 'deleteGreenSheet': s.greenSheets = s.greenSheets.filter(x=>x.id!==op.id); break;
     case 'addStandard': s.standards.push(op.entry); break;
@@ -4931,20 +4962,27 @@ function renderGreenSheetRundown(job){
       rowDescs.push({ doc:d, docIdx, line:null, lineIdx:0 });
     }
   });
-  const totalMaterial = totalsEntries.reduce((s,t)=>s+(Number(t.line.materialTotal)||0),0);
+  const totalMaterial = totalsEntries.reduce((s,t)=>s+(greenSheetLineMaterialCombined(t.line)||0),0);
   const totalShop = totalsEntries.reduce((s,t)=>s+(Number(t.line.shopHours)||0),0);
   const totalField = totalsEntries.reduce((s,t)=>s+(Number(t.line.fieldHours)||0),0);
   const totalsBlock = totalsEntries.length>0 ? `
     <div style="margin:10px 0 18px; padding:14px 16px; background:var(--gray-dim); border:1.5px solid var(--line-strong); border-radius:var(--radius);">
       <div style="font-family:var(--sans); font-weight:700; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted); margin-bottom:8px;">Green Sheet total${totalsEntries.length>1?'s':''} (tab 1 of each workbook)</div>
-      ${totalsEntries.map(t=>`
-        <div style="display:flex; flex-wrap:wrap; align-items:baseline; gap:24px; ${totalsEntries.length>1?'margin-bottom:8px;':''}">
-          <div style="font-family:var(--disp); font-weight:800; font-size:24px;">${t.line.materialTotal!=null?fmtMoney(t.line.materialTotal):'—'}</div>
+      ${totalsEntries.map(t=>{
+        const combined = greenSheetLineMaterialCombined(t.line);
+        const hasSplit = t.line.materialTotal!=null && t.line.materialTotalNonTaxable!=null;
+        return `
+        <div style="${totalsEntries.length>1?'margin-bottom:8px;':''}">
+        <div style="display:flex; flex-wrap:wrap; align-items:baseline; gap:24px;">
+          <div style="font-family:var(--disp); font-weight:800; font-size:24px;">${combined!=null?fmtMoney(combined):'—'}</div>
           <div style="font-size:15px;"><span style="font-weight:800; font-size:17px;">${t.line.shopHours!=null?t.line.shopHours.toLocaleString():'—'}</span> shop hrs</div>
           <div style="font-size:15px;"><span style="font-weight:800; font-size:17px;">${t.line.fieldHours!=null?t.line.fieldHours.toLocaleString():'—'}</span> field hrs</div>
           ${!readOnly ? `<button class="btn sm secondary" onclick="openGreenSheetLineEdit('${job.id}', ${t.docIdx}, 0)" title="Edit this total">${icon('edit')}</button>` : ''}
           ${totalsEntries.length>1 ? `<div class="issue-meta" style="width:100%;">${esc(t.doc.name)}${t.line.systemName?` — ${esc(t.line.systemName)}`:''}</div>` : ''}
-        </div>`).join('')}
+        </div>
+        ${hasSplit ? `<div class="issue-meta" style="margin-top:2px;">Taxable ${fmtMoney(t.line.materialTotal)} + Non-Taxable ${fmtMoney(t.line.materialTotalNonTaxable)}</div>` : ''}
+        </div>`;
+      }).join('')}
       ${!readOnly ? `<button class="btn sm safety" style="margin-top:4px;" onclick="applyGreenSheetHoursToJob('${job.id}', ${totalField}, ${totalShop})">${icon('clipboardList')} Apply totals to Bid Hours</button>` : ''}
     </div>` : '';
   const rows = rowDescs.map(r=>{
@@ -4960,7 +4998,7 @@ function renderGreenSheetRundown(job){
     return `<tr onclick="openGreenSheetSystemDetail('${job.id}', ${r.docIdx}, ${r.lineIdx})" style="cursor:pointer;" title="View details for this system">
       <td data-label="System #" class="idcell">${esc(line.systemNo||'—')}</td>
       <td data-label="System">${esc(line.systemName||'—')}${sourceNote}</td>
-      <td data-label="Material Total">${line.materialTotal!=null?fmtMoney(line.materialTotal):'—'}</td>
+      <td data-label="Material Total">${greenSheetLineMaterialCombined(line)!=null?fmtMoney(greenSheetLineMaterialCombined(line)):'—'}</td>
       <td data-label="Shop Hours">${line.shopHours!=null?line.shopHours.toLocaleString():'—'}</td>
       <td data-label="Field Hours">${line.fieldHours!=null?line.fieldHours.toLocaleString():'—'}</td>
       <td></td>
@@ -4969,7 +5007,7 @@ function renderGreenSheetRundown(job){
   }).join('');
   return `
     <div class="section-title" style="margin-top:22px;">Green Sheet rundown</div>
-    <div class="issue-meta" style="margin-bottom:10px;">Tab 1 of each uploaded Green Sheet workbook is its total across every other tab (shown above, big and bold); the remaining tabs are the individual systems — System # (D1), System (E1), Material Total (G49), Shop Hours (C22), Field Hours (C60). Use Edit to correct or fill in a line by hand.</div>
+    <div class="issue-meta" style="margin-bottom:10px;">Tab 1 of each uploaded Green Sheet workbook is its total across every other tab (shown above, big and bold); the remaining tabs are the individual systems — System # (D1), System (E1), Material Total (Taxable G49 + Non-Taxable G63), Shop Hours (C22), Field Hours (C60). Click a system for its full material line-item breakdown. Use Edit to correct or fill in a line by hand.</div>
     ${totalsBlock}
     ${rowDescs.length>0 ? `<div style="overflow-x:auto;">
     <table><thead><tr><th>System #</th><th>System</th><th>Material Total</th><th>Shop Hours</th><th>Field Hours</th><th></th><th></th></tr></thead>
@@ -4987,7 +5025,7 @@ function openGreenSheetLineEdit(jobId, docIdx, lineIdx){
   const doc = job && job.contractDocs && job.contractDocs[docIdx];
   if(!doc) return;
   const lines = greenSheetDocLines(doc);
-  const line = lines[lineIdx] || { sheetName:'', systemNo:'', systemName:'', materialTotal:null, shopHours:null, fieldHours:null };
+  const line = lines[lineIdx] || { sheetName:'', systemNo:'', systemName:'', materialTotal:null, materialTotalNonTaxable:null, shopHours:null, fieldHours:null };
   ui.gsEditRef = { jobId, docIdx, lineIdx, line };
   openModal('greensheet-line');
 }
@@ -4999,7 +5037,7 @@ function openGreenSheetLineEdit(jobId, docIdx, lineIdx){
 // invoice, submittal, schedule update) — a direct overlay, not openModal(),
 // so it stays viewable in read-only/View As contexts; only the Edit button
 // inside is gated on !readOnly.
-function openGreenSheetSystemDetail(jobId, docIdx, lineIdx){
+async function openGreenSheetSystemDetail(jobId, docIdx, lineIdx){
   const job = getJob(jobId);
   const doc = job && job.contractDocs && job.contractDocs[docIdx];
   if(!doc) return;
@@ -5012,6 +5050,56 @@ function openGreenSheetSystemDetail(jobId, docIdx, lineIdx){
   overlay.onclick = (e)=>{ if(e.target===overlay) closeModal(); };
   overlay.innerHTML = greenSheetSystemDetailHTML(job, doc, docIdx, line, lineIdx);
   document.body.appendChild(overlay);
+  // This line was parsed before the material-line breakdown / Non-Taxable
+  // total existed (materialLines is undefined, not just an empty array —
+  // an empty array means "parsed, genuinely nothing to show"). Re-derive it
+  // now from the doc's own stored file, then quietly re-render this same
+  // popup in place if it's still open — Greg never has to re-upload
+  // anything to pick up the fuller breakdown.
+  if(line.materialLines===undefined){
+    await backfillGreenSheetLineDetail(jobId, docIdx);
+    if(document.querySelector('.modal-overlay')===overlay){
+      const freshJob = getJob(jobId);
+      const freshDoc = freshJob && freshJob.contractDocs && freshJob.contractDocs[docIdx];
+      const freshLine = freshDoc && greenSheetDocLines(freshDoc)[lineIdx];
+      if(freshLine) overlay.innerHTML = greenSheetSystemDetailHTML(freshJob, freshDoc, docIdx, freshLine, lineIdx);
+    }
+  }
+}
+// See the comment on openGreenSheetSystemDetail above — this is the actual
+// re-parse, done client-side from doc.dataUrl (the original uploaded
+// workbook's bytes, always retained) rather than requiring a fresh upload.
+// Silently does nothing if the spreadsheet-reading library never loaded
+// (typeof XLSX==='undefined', same degrade-gracefully rule as the rest of
+// Green Sheet parsing), if the doc has no stored file, or if the re-parse
+// throws for any reason — Greg just keeps seeing the summary fields without
+// a breakdown table in that case, exactly like before this feature existed,
+// rather than an error.
+async function backfillGreenSheetLineDetail(jobId, docIdx){
+  if(typeof XLSX==='undefined') return;
+  const job = getJob(jobId);
+  const doc = job && job.contractDocs && job.contractDocs[docIdx];
+  if(!doc || !doc.dataUrl) return;
+  const lines = greenSheetDocLines(doc);
+  if(lines.length===0 || lines.every(l=>l.materialLines!==undefined)) return;
+  let wb;
+  try{
+    const blob = await (await fetch(doc.dataUrl)).blob();
+    const buf = await blob.arrayBuffer();
+    wb = XLSX.read(buf, {type:'array'});
+  }catch(e){
+    console.error('Green Sheet material-line backfill failed', e);
+    return;
+  }
+  lines.forEach((line, lineIdx)=>{
+    if(line.materialLines!==undefined) return;
+    const ws = wb.Sheets[line.sheetName];
+    if(!ws) return;
+    commit({type:'backfillGreenSheetLineDetail', jobId, docIdx, lineIdx,
+      materialLines: parseGreenSheetMaterialLines(ws),
+      materialTotalNonTaxable: (v=>isNaN(v)?null:v)(cellNumber(ws,'G63')),
+    });
+  });
 }
 function greenSheetSystemDetailHTML(job, doc, docIdx, line, lineIdx){
   const row = (label, value, big)=>`
@@ -5022,15 +5110,28 @@ function greenSheetSystemDetailHTML(job, doc, docIdx, line, lineIdx){
   // Per Greg directly: clicking a system should show the material budget
   // breakdown that makes up that system's total — the individual Cost
   // Code / Description / Cost per Sq Ft / Total Cost lines from the D:G
-  // block above the workbook's Material Total (see parseGreenSheetMaterialLines).
-  // Only present on docs parsed with this feature; older docs and hand-filled
-  // fallback lines simply don't have it, so the table is skipped for those.
+  // block, covering both the workbook's TOTAL TAXABLE MATERIAL (G49) and
+  // TOTAL NON-TAXABLE MATERIAL (G63) sections (see
+  // parseGreenSheetMaterialLines) — shown as two separate tables so it's
+  // clear which total each line feeds, matching the real workbook's own
+  // two sections rather than implying everything is one undifferentiated
+  // list. Sales Tax (row 50) sits between those two totals in the real
+  // workbook and isn't summed into either one, so it gets its own summary
+  // row instead of being listed in a table — folding it into the
+  // non-taxable table used to make that table's own numbers add up to far
+  // more than the Non-Taxable total shown right above it. Only present on
+  // docs parsed with this feature (or since backfilled — see
+  // backfillGreenSheetLineDetail); older docs and hand-filled fallback
+  // lines simply don't have it, so the tables are skipped for those.
   const materialLines = Array.isArray(line.materialLines) ? line.materialLines : [];
-  const materialTable = materialLines.length>0 ? `
-    <div class="section-title" style="margin-top:20px; font-size:12px;">Material budget breakdown</div>
+  const taxableLines = materialLines.filter(m=>m.category==='taxable');
+  const nonTaxableLines = materialLines.filter(m=>m.category==='non-taxable');
+  const salesTaxLine = materialLines.find(m=>m.category==='sales-tax');
+  const materialGroupTable = (title, lines)=> lines.length>0 ? `
+    <div class="section-title" style="margin-top:20px; font-size:12px;">${title}</div>
     <div style="overflow-x:auto; margin-top:6px;">
     <table><thead><tr><th>Cost Code</th><th>Description of Material</th><th>Cost per Sq Ft</th><th>Total Cost</th></tr></thead>
-    <tbody>${materialLines.map(m=>`<tr>
+    <tbody>${lines.map(m=>`<tr>
       <td data-label="Cost Code" class="idcell">${esc(m.costCode)}</td>
       <td data-label="Description of Material">${esc(m.description)}</td>
       <td data-label="Cost per Sq Ft">${m.costPerSqFt!=null?fmtMoney(m.costPerSqFt):'—'}</td>
@@ -5038,17 +5139,22 @@ function greenSheetSystemDetailHTML(job, doc, docIdx, line, lineIdx){
     </tr>`).join('')}</tbody>
     </table>
     </div>` : '';
+  const combined = greenSheetLineMaterialCombined(line);
   return `<div class="modal" style="max-width:${materialLines.length>0?'640px':'480px'};">
     <h3>${esc(line.systemName || (line.systemNo?`System ${line.systemNo}`:'System detail'))}</h3>
     <p class="sub">${esc(doc.name)}${line.sheetName?` — ${esc(line.sheetName)}`:''}</p>
     <div style="display:flex; flex-direction:column; gap:14px; margin:18px 0;">
       ${row('System #', esc(line.systemNo||'—'))}
       ${row('System', esc(line.systemName||'—'))}
-      ${row('Material Total', line.materialTotal!=null?fmtMoney(line.materialTotal):'—', true)}
+      ${row('Material Total (Taxable)', line.materialTotal!=null?fmtMoney(line.materialTotal):'—')}
+      ${row('Material Total (Non-Taxable)', line.materialTotalNonTaxable!=null?fmtMoney(line.materialTotalNonTaxable):'—')}
+      ${row('Total Material Budget', combined!=null?fmtMoney(combined):'—', true)}
+      ${salesTaxLine ? row('Sales Tax', fmtMoney(salesTaxLine.totalCost)) : ''}
       ${row('Shop Hours', line.shopHours!=null?line.shopHours.toLocaleString():'—')}
       ${row('Field Hours', line.fieldHours!=null?line.fieldHours.toLocaleString():'—')}
     </div>
-    ${materialTable}
+    ${materialGroupTable('Taxable material', taxableLines)}
+    ${materialGroupTable('Non-taxable material (shop drawings, engineering, freight, and similar)', nonTaxableLines)}
     <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Close</button>
     ${!readOnly ? `<button class="btn safety" onclick="closeModal(); openGreenSheetLineEdit('${job.id}', ${docIdx}, ${lineIdx});">${icon('edit')} Edit</button>` : ''}</div>
   </div>`;
@@ -5059,11 +5165,13 @@ function submitGreenSheetLine(){
   const systemNo = document.getElementById('f-gs-systemno').value.trim();
   const systemName = document.getElementById('f-gs-systemname').value.trim();
   const mat = document.getElementById('f-gs-material').value;
+  const matNonTax = document.getElementById('f-gs-material-nontax').value;
   const shop = document.getElementById('f-gs-shop').value;
   const field = document.getElementById('f-gs-field').value;
   commit({type:'updateGreenSheetLine', jobId: ref.jobId, docIdx: ref.docIdx, lineIdx: ref.lineIdx, patch: {
     systemNo, systemName,
     materialTotal: mat===''?null:Number(mat),
+    materialTotalNonTaxable: matNonTax===''?null:Number(matNonTax),
     shopHours: shop===''?null:Number(shop),
     fieldHours: field===''?null:Number(field),
   }});
@@ -5225,33 +5333,50 @@ function cellNumber(ws, ref){
   if(typeof v === 'string') return Number(v.replace(/[^0-9.\-]/g,''));
   return NaN;
 }
-// The material budget breakdown that backs each system's Material Total
-// (G49 — see parseGreenSheetWorkbook). Per Greg directly: "Column D = Cost
-// Code, Column E = Description of Material, Column F = Cost per Sq Ft,
-// Column G equals total cost" and the block runs from just under the D1/E1
-// header down to the G49 total. Row 49 itself is excluded here since it's
-// already captured separately as materialTotal — this only covers the
-// individual line items that sum into it (rows 2-48; rows 2-7 are workbook
-// header/rate cells like "Shop Labor Rate" with no Cost Code in column D,
-// so requiring a Cost Code is what keeps those out without hardcoding a
-// higher start row). A line only counts if it actually carries budget
-// dollars (Total Cost non-zero) — most cost codes on a given tab are
-// unused categories left at 0, and listing all ~40 of them per system
-// would bury the ones that matter.
+// The material budget breakdown that backs each system's two material
+// totals (see parseGreenSheetWorkbook): TOTAL TAXABLE MATERIAL at G49
+// (=SUM(G8:G48)) and TOTAL NON-TAXABLE MATERIAL at G63 (=SUM(G51:G62) —
+// Shop Drawings, Engineering, Freight, and similar). Per Greg directly:
+// "Column D = Cost Code, Column E = Description of Material, Column F =
+// Cost per Sq Ft, Column G equals total cost." Both blocks share the
+// identical D/E/F/G column layout, so one loop over rows 2-62 covers both
+// — the two total rows themselves (49, 63) are excluded automatically
+// because their E column is empty, and row 51 (just the sales-tax rate,
+// e.g. 0.0988, no line item) is excluded because its D column is empty.
+// Row 50 (Sales Tax, cost code 20-51) sits between the two totals in the
+// real workbook and is NOT part of either SUM range — confirmed directly
+// against Greg's workbook's own formulas — so it's tagged as its own
+// 'sales-tax' category rather than folded into 'non-taxable'; lumping it
+// in there was the original bug: it made the itemized non-taxable table
+// add up to far more than the actual TOTAL NON-TAXABLE MATERIAL (G63)
+// figure shown right above it. Rows 2-7 are workbook header/rate cells
+// like "Shop Labor Rate" with no Cost Code either, so requiring a Cost
+// Code is what keeps those out too, without hardcoding a higher start
+// row. A line only counts if it actually carries budget dollars (Total
+// Cost non-zero) — most cost codes on a given tab are unused categories
+// left at 0, and listing all ~50 of them per system would bury the ones
+// that matter. Each line is tagged with which total it belongs to, so the
+// UI can group and label them correctly instead of implying every
+// material cost is taxable.
 function parseGreenSheetMaterialLines(ws){
   const out = [];
-  for(let row=2; row<=48; row++){
+  for(let row=2; row<=62; row++){
     const costCode = cellValue(ws, 'D'+row);
     const description = cellValue(ws, 'E'+row);
     if(costCode==null || costCode==='' || description==null || description==='') continue;
     const totalCost = cellNumber(ws, 'G'+row);
     if(isNaN(totalCost) || totalCost===0) continue;
     const costPerSqFt = cellNumber(ws, 'F'+row);
+    let category;
+    if(row<=48) category = 'taxable';
+    else if(row===50) category = 'sales-tax';
+    else category = 'non-taxable';
     out.push({
       costCode: String(costCode),
       description: String(description).trim(),
       costPerSqFt: isNaN(costPerSqFt) ? null : costPerSqFt,
       totalCost,
+      category,
     });
   }
   return out;
@@ -5271,22 +5396,24 @@ async function parseGreenSheetWorkbook(file){
       const systemNo = cellValue(ws,'D1');
       const systemName = cellValue(ws,'E1');
       const materialTotal = cellNumber(ws,'G49');
+      const materialTotalNonTaxable = cellNumber(ws,'G63');
       const shopHours = cellNumber(ws,'C22');
       const fieldHours = cellNumber(ws,'C60');
-      const hasAnything = systemNo!==undefined || systemName!==undefined || !isNaN(materialTotal) || !isNaN(shopHours) || !isNaN(fieldHours);
+      const hasAnything = systemNo!==undefined || systemName!==undefined || !isNaN(materialTotal) || !isNaN(materialTotalNonTaxable) || !isNaN(shopHours) || !isNaN(fieldHours);
       if(!hasAnything) continue; // tab doesn't match the layout — likely a cover/notes tab, not a system
       lines.push({
         sheetName,
         systemNo: systemNo!=null ? String(systemNo) : '',
         systemName: systemName!=null ? String(systemName) : '',
         materialTotal: isNaN(materialTotal) ? null : materialTotal,
+        materialTotalNonTaxable: isNaN(materialTotalNonTaxable) ? null : materialTotalNonTaxable,
         shopHours: isNaN(shopHours) ? null : shopHours,
         fieldHours: isNaN(fieldHours) ? null : fieldHours,
         materialLines: parseGreenSheetMaterialLines(ws),
       });
     }
     if(lines.length===0){
-      return { parseError: "Couldn't find any of the expected cells (D1/E1/G49/C22/C60) on any tab — check this workbook matches the standard Green Sheet layout." };
+      return { parseError: "Couldn't find any of the expected cells (D1/E1/G49/G63/C22/C60) on any tab — check this workbook matches the standard Green Sheet layout." };
     }
     return { greenSheetLines: lines, parseError: null };
   }catch(e){
@@ -5310,9 +5437,22 @@ function greenSheetDocLines(doc){
     systemNo: doc.systemNo || '',
     systemName: doc.systemName || '',
     materialTotal: doc.materialTotal!=null ? doc.materialTotal : null,
+    materialTotalNonTaxable: doc.materialTotalNonTaxable!=null ? doc.materialTotalNonTaxable : null,
     shopHours: doc.shopHours!=null ? doc.shopHours : null,
     fieldHours: doc.fieldHours!=null ? doc.fieldHours : null,
   }];
+}
+// The workbook tracks Taxable and Non-Taxable material as two separate
+// totals (G49 and G63 — see parseGreenSheetWorkbook); this is the true
+// bottom-line material figure Greg cares about day to day, so it's what the
+// rundown table and totals block show, with the taxable/non-taxable split
+// broken out in the system detail popup for anyone who needs it. Returns
+// null (not 0) only when neither total was ever parsed, so a genuinely
+// unparsed line still renders as "—" rather than a misleading $0.
+function greenSheetLineMaterialCombined(line){
+  const t = line.materialTotal, n = line.materialTotalNonTaxable;
+  if(t==null && n==null) return null;
+  return (t||0) + (n||0);
 }
 function isSpreadsheetFile(file){ return /\.(xlsx|xls|xlsm)$/i.test(file.name||''); }
 async function handleContractDocSelect(ev, jobId, docType){
@@ -8025,7 +8165,7 @@ function modalHTML(type){
   }
   if(type==='greensheet-line'){
     const ref = ui.gsEditRef;
-    const line = (ref && ref.line) || { sheetName:'', systemNo:'', systemName:'', materialTotal:null, shopHours:null, fieldHours:null };
+    const line = (ref && ref.line) || { sheetName:'', systemNo:'', systemName:'', materialTotal:null, materialTotalNonTaxable:null, shopHours:null, fieldHours:null };
     return `<div class="modal">
       <h3>Edit Green Sheet line</h3><p class="sub">${line.sheetName?`Tab: ${esc(line.sheetName)} — `:''}corrects this one line in the rundown; the uploaded workbook itself isn't changed.</p>
       <div class="field-row">
@@ -8033,7 +8173,10 @@ function modalHTML(type){
         <div class="field"><label>System</label><input id="f-gs-systemname" value="${esc(line.systemName||'')}" placeholder="e.g. Storefront"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Material Total</label><input type="number" id="f-gs-material" value="${line.materialTotal!=null?line.materialTotal:''}" placeholder="0" step="0.01"></div>
+        <div class="field"><label>Material Total (Taxable)</label><input type="number" id="f-gs-material" value="${line.materialTotal!=null?line.materialTotal:''}" placeholder="0" step="0.01"></div>
+        <div class="field"><label>Material Total (Non-Taxable)</label><input type="number" id="f-gs-material-nontax" value="${line.materialTotalNonTaxable!=null?line.materialTotalNonTaxable:''}" placeholder="0" step="0.01"></div>
+      </div>
+      <div class="field-row">
         <div class="field"><label>Shop Hours</label><input type="number" id="f-gs-shop" value="${line.shopHours!=null?line.shopHours:''}" placeholder="0" step="0.5"></div>
         <div class="field"><label>Field Hours</label><input type="number" id="f-gs-field" value="${line.fieldHours!=null?line.fieldHours:''}" placeholder="0" step="0.5"></div>
       </div>
