@@ -22,6 +22,7 @@ const auth = require('../lib/auth');
 const roles = require('../lib/roles');
 const webpush = require('../lib/webpush');
 const { geocodeAddress } = require('../lib/geocode');
+const { postToTeamsWebhook } = require('../lib/teamsWebhook');
 
 const MAX_BODY_BYTES = 20 * 1024 * 1024; // 20MB — matches the app's own MAX_STATE_BYTES headroom
 
@@ -39,6 +40,51 @@ const vapidKeys = (process.env.NUCLEUS_VAPID_PUBLIC_KEY && process.env.NUCLEUS_V
 const VAPID_SUBJECT = 'mailto:' + (process.env.NUCLEUS_ADMIN_EMAIL || 'notifications@example.com');
 function notificationPushTitle(type) {
   return type === 'costImpact' ? 'Nucleus — Cost impact' : 'Nucleus — Request';
+}
+
+// ---- Microsoft Teams channel posts (Greg: "Post updates into a Teams
+// channel" — for a Project Manager, the two things this app already treats
+// as notification-worthy for a PM (new PM Request For Field, new Cost
+// Impact — same two types notifyNewPushNotifications above already
+// pushes to a phone), plus, since Greg also asked for "all office
+// personnel", every new Office Calendar time-off entry (the whole point of
+// that page per Greg's own words was "so everyone knows when people are
+// out of the office"). One line per event, kept deliberately narrow so the
+// channel doesn't turn into noise — this does NOT mirror every notification
+// or every state change. Inactive with no NUCLEUS_TEAMS_WEBHOOK_URL set;
+// see lib/teamsWebhook.js for the webhook mechanics and how Greg gets that
+// URL from his own Teams channel. ----
+const TEAMS_WEBHOOK_URL = process.env.NUCLEUS_TEAMS_WEBHOOK_URL || null;
+function timeOffDateLabel(t) {
+  return t.startDate === t.endDate ? t.startDate : `${t.startDate} → ${t.endDate}`;
+}
+async function notifyTeamsChannel(oldState, newState) {
+  if (!TEAMS_WEBHOOK_URL) return;
+
+  // New PM Request / Cost Impact notifications. notifyMembers() (client-side)
+  // writes one notification entry PER RECIPIENT with the same refId and
+  // message, so de-dupe by refId — one Teams line per underlying event, not
+  // one per person it was addressed to.
+  const oldNotifIds = new Set((oldState.notifications || []).map((n) => n.id));
+  const newNotifs = (newState.notifications || []).filter((n) => !oldNotifIds.has(n.id) && (n.type === 'pmRequest' || n.type === 'costImpact'));
+  const seenRefIds = new Set();
+  for (const n of newNotifs) {
+    const dedupeKey = n.refId || n.id;
+    if (seenRefIds.has(dedupeKey)) continue;
+    seenRefIds.add(dedupeKey);
+    const icon = n.type === 'costImpact' ? '💰' : '📋';
+    await postToTeamsWebhook(TEAMS_WEBHOOK_URL, `${icon} ${n.message}`);
+  }
+
+  // New Office Calendar (vacation/work-trip) entries — see state.timeOff /
+  // renderOfficeCalendarSection in public/index.html.
+  const oldTimeOffIds = new Set((oldState.timeOff || []).map((t) => t.id));
+  const newTimeOff = (newState.timeOff || []).filter((t) => !oldTimeOffIds.has(t.id));
+  for (const t of newTimeOff) {
+    const person = (newState.team || []).find((m) => m.id === t.personId);
+    const name = person ? person.name : '(removed team member)';
+    await postToTeamsWebhook(TEAMS_WEBHOOK_URL, `🌴 ${name} — ${t.type} on the Office Calendar: ${timeOffDateLabel(t)}`);
+  }
 }
 // Called right after a state save succeeds, comparing the notifications
 // array before and after to find entries that are genuinely new (not just
@@ -453,6 +499,11 @@ module.exports = async (req, res) => {
           await notifyNewPushNotifications(doc.state.notifications || [], mergedState.notifications || []);
         } catch (e) {
           console.error('notifyNewPushNotifications failed:', e);
+        }
+        try {
+          await notifyTeamsChannel(doc.state, mergedState);
+        } catch (e) {
+          console.error('notifyTeamsChannel failed:', e);
         }
         return sendJSON(res, 200, { version: result.version });
       }
