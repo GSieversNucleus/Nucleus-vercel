@@ -211,6 +211,23 @@ OAuth2/PKCE implementation, unchanged. Off by default; set all four of
 `APP_BASE_URL` (your deployed domain) in Vercel's environment variables to
 turn it on. See `.env.example` for where to get each value.
 
+## Job locations map
+
+A **Job Location Map** button in the top bar shows every job pinned on a real map (real
+streets, zoom/pan), so it's easy to see at a glance how spread out the
+company's active jobs are. Nothing to configure — no API key, no account to
+create, no cost. Map tiles and address lookups both come from OpenStreetMap
+(free, no signup); the geocode cache and the once-a-second throttle
+OpenStreetMap's usage policy requires both live in Redis (`lib/geocode.js`),
+same reasoning as everything else in this build — a serverless function has
+no reliable memory between requests. A job's address is looked up
+automatically in the background the moment it's saved from Job settings; if
+that ever fails, the Job Location Map page itself offers a "Locate N jobs" retry button,
+and any job with no address yet is listed there instead of silently missing
+from the map. This works here and on the Render build, not on the Claude
+Artifact link — that one runs inside a sandbox that can't load map tiles or
+call an outside lookup service.
+
 ## Push notifications
 
 When someone gets a Nucleus notification — a cost impact reported, a
@@ -235,6 +252,31 @@ One-time setup for the whole deployment — once it's on, anyone signed in
 can turn on notifications for their own device from inside Nucleus. Leave
 both env vars unset to keep push notifications off; nothing else depends
 on them. Keep the private key as secret as `NUCLEUS_ENCRYPTION_KEY`.
+
+## Microsoft Teams channel posts
+
+Nucleus can drop a line into a Teams channel for the handful of events a
+Project Manager and the whole office actually care about seeing show up
+there: a new PM Request For Field, a new Cost Impact, and a new entry on
+the Office Calendar (someone marking vacation, a work trip, or time out of
+the office). It's deliberately narrow — this does not mirror every
+notification or every change in the app, just those three, one line each.
+
+The old "Incoming Webhook" connector Teams used to offer was retired by
+Microsoft in May 2026. Get today's replacement URL from inside the channel
+you want these posted to:
+
+1. Click the "..." next to the channel name → **Workflows**.
+2. Search for "Post to a channel when a webhook request is received"
+   (Microsoft also shows this as "Send webhook alerts to a channel").
+3. Confirm the team/channel it's posting into, and save.
+4. Copy the webhook URL it gives you.
+
+Add that URL as `NUCLEUS_TEAMS_WEBHOOK_URL` in this project's Vercel
+environment variables (see `.env.example`) and redeploy. Leave it unset to
+keep this off; nothing else depends on it. Setting this up requires access
+to your own Microsoft 365 tenant/Teams — it's not something that can be
+done from outside your organization.
 
 ## Cost
 
