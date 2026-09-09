@@ -286,6 +286,23 @@
   .save-pill.readonly .dot{ background:var(--amber); }
   .save-pill.offline .dot{ background:#6B7280; }
 
+  /* Undo-last-delete toast (see captureUndoBeforeDelete/registerUndo) — a
+     small floating pill, not part of any one panel, so it survives the full
+     re-render every delete triggers (it's appended straight to <body>,
+     never into #app). */
+  .undo-toast{
+    position:fixed; left:50%; bottom:22px; transform:translate(-50%, 16px);
+    display:flex; align-items:center; gap:10px;
+    background:#1D2530; color:#fff; padding:10px 10px 10px 16px;
+    border-radius:24px; box-shadow:0 8px 24px rgba(0,0,0,.28);
+    font-size:13px; font-weight:600; z-index:90;
+    opacity:0; pointer-events:none; transition:opacity .18s ease, transform .18s ease;
+  }
+  .undo-toast.show{ opacity:1; pointer-events:auto; transform:translate(-50%, 0); }
+  .undo-toast .undo-btn{ background:none; border:none; color:var(--steel-dim); font-weight:800; font-size:13px; cursor:pointer; padding:4px 8px; font-family:inherit; }
+  .undo-toast .undo-btn:hover{ text-decoration:underline; }
+  .undo-toast .undo-x{ background:none; border:none; color:#8A93A0; font-size:18px; line-height:1; cursor:pointer; padding:0 2px; }
+
   /* ---------- Layout ---------- */
   .wrap{ max-width:1180px; margin:0 auto; padding:24px 20px 60px; }
   .empty{
@@ -1228,7 +1245,7 @@ function submitEditTeamMember(id){
 // 'meetingminutes' (Feature H) sits right after 'notes' — same coordination
 // tool, no financial data, and (per the FOREMAN_ALLOWED_TABS comment below)
 // visible to the exact same roles Notes already is, Foreman included.
-const JOB_TAB_ORDER = ['fieldkit','overview','scope','specs','submittals','elevations','contacts','rfis','costs','budgetcosts','contract','hours','requests','engineering','schedule','procurement','safety','watertest','notes','meetingminutes','aar'];
+const JOB_TAB_ORDER = ['fieldkit','overview','scope','specs','submittals','elevations','contacts','rfis','costs','changeorders','budgetcosts','contract','hours','requests','engineering','schedule','procurement','safety','watertest','notes','meetingminutes','aar'];
 // 'elevations' and 'costs' were REMOVED from this list per Greg's request:
 // "Take away costs and elevations on the side bar for Foreman. They should
 // have everything in their Field Tool Kit section." A Foreman no longer gets
@@ -1264,6 +1281,7 @@ const OVERRIDABLE_TABS = [
   {key:'contacts', label:'Contacts'},
   {key:'rfis', label:'RFIs'},
   {key:'costs', label:'Costs'},
+  {key:'changeorders', label:'Change Orders'},
   {key:'budgetcosts', label:'Budget and Costs'},
   {key:'contract', label:'Contract'},
   {key:'hours', label:'Hours'},
@@ -1441,7 +1459,7 @@ function searchApp(query){
   pushGroup('RFIs', state.rfis.filter(r=>inScope(r.jobId) && matches(r.id,r.subject,r.submittedTo,r.gcRfiNumber))
     .map(r=>({jobId:r.jobId, tab:'rfis', title:`${r.id} — ${r.subject}`, snippet:jobLabel(r.jobId)})));
   pushGroup('Change orders', state.cos.filter(c=>inScope(c.jobId) && matches(coNumber(c),c.id,c.description,c.notes,c.gcNumber,c.scoNumber))
-    .map(c=>({jobId:c.jobId, tab:'cos', title:`${c.id} — ${c.description}`, snippet:jobLabel(c.jobId)})));
+    .map(c=>({jobId:c.jobId, tab:'changeorders', title:`${c.id} — ${c.description}`, snippet:jobLabel(c.jobId)})));
   pushGroup('Cost impacts', state.issues.filter(i=>inScope(i.jobId) && matches(i.id,i.description,i.category,i.reportedBy))
     .map(i=>({jobId:i.jobId, tab:'costs', title:`${i.id} — ${i.description}`, snippet:jobLabel(i.jobId)})));
   pushGroup('PM Requests For Field', state.requests.filter(r=>inScope(r.jobId) && matches(r.id,r.title,r.description,r.requestedBy))
@@ -1599,10 +1617,10 @@ function goToSearchResult(jobId, tab){
   hideTopSearchResults();
   const inp = document.getElementById('topsearch-input');
   if(inp) inp.value = '';
-  // Feature E: 'cos' (Change orders) is a search-result tab id inherited
-  // from when it was a top-level tab — it now lives as the "changeorders"
-  // sub-tab of Costs, so route it there instead of a dead top-level tab id.
-  if(tab==='cos'){ openJob(jobId, 'costs'); ui.costSubTab = 'changeorders'; render(); return; }
+  // Change orders is its own top-level job tab again (Greg asked for it
+  // back out of Costs) — 'cos' is kept as an accepted alias for any old
+  // bookmark or saved link that still points at the pre-Feature-E tab id.
+  if(tab==='cos'){ openJob(jobId, 'changeorders'); return; }
   openJob(jobId, tab || 'overview');
 }
 
@@ -2630,11 +2648,219 @@ function applyOp(op, s){
       break;
     case 'addTimeOff': s.timeOff.push(op.entry); break;
     case 'deleteTimeOff': s.timeOff = s.timeOff.filter(x=>x.id!==op.id); break;
+
+    // ---- Generic "undo last delete" restore ops — see captureUndoBeforeDelete
+    // and registerUndo/performUndo below for how these get triggered. Kept as
+    // real op types (not a direct state overwrite) so an undo replays safely
+    // through the same pendingQueue/409-conflict-replay path as every other
+    // edit, and so it merges cleanly onto other people's devices too.
+    case 'restoreItem': {
+      const arr = s[op.arrayKey];
+      if(arr && !arr.some(x=>x.id===op.item.id)) arr.push(op.item);
+      break;
+    }
+    case 'restoreNestedItem': {
+      const parent = (s[op.arrayKey]||[]).find(x=>x[op.parentField]===op.parentValue);
+      if(parent){
+        parent[op.subKey] = parent[op.subKey] || [];
+        if(!parent[op.subKey].some(x=>x.id===op.item.id)) parent[op.subKey].push(op.item);
+      }
+      break;
+    }
+    case 'restoreJobCascade': {
+      if(!s.jobs.some(j=>j.id===op.job.id)) s.jobs.push(op.job);
+      Object.keys(op.related||{}).forEach(k=>{
+        if(!Array.isArray(s[k])) return;
+        (op.related[k]||[]).forEach(item=>{ if(!s[k].some(x=>x.id===item.id)) s[k].push(item); });
+      });
+      (op.overrides||[]).forEach(o=>{
+        const m = s.team.find(x=>x.id===o.id);
+        if(m){ m.jobOverrides = m.jobOverrides || {}; m.jobOverrides[op.job.id] = o.val; }
+      });
+      break;
+    }
+    case 'restoreTeamMemberCascade': {
+      if(!s.team.some(m=>m.id===op.member.id)) s.team.push(op.member);
+      (op.pmJobs||[]).forEach(jobId=>{ const j=s.jobs.find(x=>x.id===jobId); if(j){ j.assignedPMs=j.assignedPMs||[]; if(!j.assignedPMs.includes(op.member.id)) j.assignedPMs.push(op.member.id); } });
+      (op.foremanJobs||[]).forEach(jobId=>{ const j=s.jobs.find(x=>x.id===jobId); if(j){ j.assignedForemen=j.assignedForemen||[]; if(!j.assignedForemen.includes(op.member.id)) j.assignedForemen.push(op.member.id); } });
+      break;
+    }
+    case 'restoreSpecCascade': {
+      if(!s.specs.some(x=>x.id===op.spec.id)) s.specs.push(op.spec);
+      (op.submittals||[]).forEach(su=>{ if(!s.submittals.some(x=>x.id===su.id)) s.submittals.push(su); });
+      break;
+    }
+    case 'restorePostitColumnCascade': {
+      let b = s.postItBoards.find(x=>x.ownerId===op.ownerId);
+      if(!b){ b = {ownerId:op.ownerId, columns:[], notes:[]}; s.postItBoards.push(b); }
+      if(!b.columns.some(c=>c.id===op.column.id)) b.columns.push(op.column);
+      (op.notes||[]).forEach(n=>{ if(!b.notes.some(x=>x.id===n.id)) b.notes.push(n); });
+      break;
+    }
   }
   return s;
 }
 
+/* ================= Undo last delete =================
+   Greg: "if someone accidentally erased or deleted something, can there be
+   an undo button added." Scoped deliberately to the single most recent
+   delete, surfaced as a dismissible toast for a short window right after it
+   happens — not a full undo/redo history across every action (a much bigger
+   feature than catching a slip of the thumb). For anything outside that
+   window, the "Backup data" button (a full JSON export) and, on the server
+   builds, the automatic Redis snapshots taken on every save are the real
+   disaster-recovery net.
+
+   Every delete op in this app removes an object in one of three shapes, so
+   rather than hand-writing a bespoke restore for each of the ~35 delete
+   operations, they're captured generically from the two lookup tables below,
+   keyed by op.type. A future delete op needs one line added to whichever
+   table matches its shape, not a new restore function:
+     FLAT   — removes one object from a top-level state array by id (the
+              large majority: deleteContact, deleteMaterial, etc).
+     NESTED — removes one object from a sub-array living on a parent object
+              that itself sits in a top-level array (deleteTaskNote,
+              deleteElevationItem, deleteEngineeringComment, etc).
+   The handful of deletes that cascade across more than one array, or key
+   their parent lookup on something other than id — deleteJob, deleteTeam
+   Member, deleteSpec, and deletePostitColumn — get their own small capture
+   function below the tables instead of forcing those into a shape that
+   doesn't fit them. */
+const ARRAY_UNDO_LABELS = {
+  aar:'AAR entry', hours:'hours entry', contacts:'contact', materials:'material',
+  scope:'scope item', schedule:'task', scheduleUpdates:'schedule update',
+  notes:'note', meetingMinutes:'meeting minutes entry', requests:'PM request',
+  engineering:'engineering item', elevations:'elevation', ganttLogs:'gantt log',
+  scheduleFieldNotes:'field note', gcCommLog:'GC communication log entry',
+  greenSheets:'budget line', standards:'standard', safetyDocs:'safety doc',
+  weldingProcedures:'welding procedure', waterTests:'water test',
+  elevationMarkups:'elevation markup', greenSheetQuotes:'quote',
+  procurement:'procurement item', equipmentLog:'equipment log entry',
+  dailyReports:'daily report', timeOff:'time-off entry', submittals:'submittal',
+  invoices:'invoice',
+};
+const FLAT_DELETE_UNDO = {
+  deleteAAR: {arrayKey:'aar', idField:'id'},
+  deleteHours: {arrayKey:'hours', idField:'id'},
+  deleteContact: {arrayKey:'contacts', idField:'id'},
+  deleteMaterial: {arrayKey:'materials', idField:'id'},
+  deleteScope: {arrayKey:'scope', idField:'id'},
+  deleteTask: {arrayKey:'schedule', idField:'id'},
+  deleteScheduleUpdate: {arrayKey:'scheduleUpdates', idField:'id'},
+  deleteNote: {arrayKey:'notes', idField:'id'},
+  deleteMeetingMinutes: {arrayKey:'meetingMinutes', idField:'id'},
+  deleteRequest: {arrayKey:'requests', idField:'id'},
+  deleteEngineering: {arrayKey:'engineering', idField:'id'},
+  deleteElevation: {arrayKey:'elevations', idField:'id'},
+  deleteGanttLog: {arrayKey:'ganttLogs', idField:'id'},
+  deleteScheduleFieldNote: {arrayKey:'scheduleFieldNotes', idField:'id'},
+  deleteGcComm: {arrayKey:'gcCommLog', idField:'id'},
+  deleteGreenSheet: {arrayKey:'greenSheets', idField:'id'},
+  deleteStandard: {arrayKey:'standards', idField:'id'},
+  deleteSafetyDoc: {arrayKey:'safetyDocs', idField:'id'},
+  deleteWeldingProcedure: {arrayKey:'weldingProcedures', idField:'id'},
+  deleteWaterTest: {arrayKey:'waterTests', idField:'id'},
+  deleteElevationMarkup: {arrayKey:'elevationMarkups', idField:'id'},
+  deleteGreenSheetQuote: {arrayKey:'greenSheetQuotes', idField:'id'},
+  deleteProcurement: {arrayKey:'procurement', idField:'id'},
+  deleteEquipmentLog: {arrayKey:'equipmentLog', idField:'id'},
+  deleteDailyReport: {arrayKey:'dailyReports', idField:'id'},
+  deleteTimeOff: {arrayKey:'timeOff', idField:'id'},
+  deleteSubmittal: {arrayKey:'submittals', idField:'subId'},
+  deleteInvoice: {arrayKey:'invoices', idField:'invId'},
+};
+const NESTED_DELETE_UNDO = {
+  deleteTaskNote: {arrayKey:'schedule', parentField:'id', parentOpField:'taskId', subKey:'notes', subIdField:'noteId', label:'task note'},
+  deleteMeetingMinutesItem: {arrayKey:'meetingMinutes', parentField:'id', parentOpField:'mtgId', subKey:'items', subIdField:'itemId', label:'agenda item'},
+  deleteRequestFieldNote: {arrayKey:'requests', parentField:'id', parentOpField:'reqId', subKey:'fieldNotes', subIdField:'noteId', label:'field note'},
+  deleteEngineeringComment: {arrayKey:'engineering', parentField:'id', parentOpField:'engId', subKey:'comments', subIdField:'commentId', label:'comment'},
+  deleteElevationItem: {arrayKey:'elevations', parentField:'id', parentOpField:'elevId', subKey:'items', subIdField:'itemId', label:'elevation item'},
+  deleteElevationNote: {arrayKey:'elevations', parentField:'id', parentOpField:'elevId', subKey:'foremanNotes', subIdField:'noteId', label:'foreman note'},
+  deletePostitNote: {arrayKey:'postItBoards', parentField:'ownerId', parentOpField:'ownerId', subKey:'notes', subIdField:'noteId', label:'sticky note'},
+};
+const JOB_DELETE_CASCADE_KEYS = ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','elevations','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'];
+function captureJobDeleteUndo(op){
+  const job = state.jobs.find(j=>j.id===op.jobId);
+  if(!job) return;
+  const related = {};
+  JOB_DELETE_CASCADE_KEYS.forEach(k=>{ related[k] = (state[k]||[]).filter(x=>x.jobId===op.jobId); });
+  const overrides = state.team.filter(m=>m.jobOverrides && Object.prototype.hasOwnProperty.call(m.jobOverrides, op.jobId)).map(m=>({id:m.id, val:m.jobOverrides[op.jobId]}));
+  registerUndo('restoreJobCascade', JSON.parse(JSON.stringify({job, related, overrides})), `job ${job.id}`);
+}
+function captureTeamMemberDeleteUndo(op){
+  const member = state.team.find(m=>m.id===op.id);
+  if(!member) return;
+  const pmJobs = state.jobs.filter(j=>j.assignedPMs && j.assignedPMs.includes(op.id)).map(j=>j.id);
+  const foremanJobs = state.jobs.filter(j=>j.assignedForemen && j.assignedForemen.includes(op.id)).map(j=>j.id);
+  registerUndo('restoreTeamMemberCascade', JSON.parse(JSON.stringify({member, pmJobs, foremanJobs})), 'team member');
+}
+function captureSpecDeleteUndo(op){
+  const spec = state.specs.find(sp=>sp.id===op.specId);
+  if(!spec) return;
+  const submittals = state.submittals.filter(su=>su.specId===op.specId);
+  registerUndo('restoreSpecCascade', JSON.parse(JSON.stringify({spec, submittals})), 'spec');
+}
+function capturePostitColumnDeleteUndo(op){
+  const board = state.postItBoards.find(b=>b.ownerId===op.ownerId);
+  const column = board && board.columns.find(c=>c.id===op.colId);
+  if(!board || !column) return;
+  const notes = board.notes.filter(n=>n.columnId===op.colId);
+  registerUndo('restorePostitColumnCascade', JSON.parse(JSON.stringify({ownerId:op.ownerId, column, notes})), 'column');
+}
+// Looks up whatever the about-to-run delete op is going to remove, from
+// state as it stands RIGHT NOW — must run before applyOp (see commit below),
+// since applyOp is what actually filters the item out.
+function captureUndoBeforeDelete(op){
+  const flat = FLAT_DELETE_UNDO[op.type];
+  if(flat){
+    const arr = state[flat.arrayKey] || [];
+    const item = arr.find(x=>x[flat.idField]===op[flat.idField]);
+    if(item) registerUndo('restoreItem', {arrayKey:flat.arrayKey, item:JSON.parse(JSON.stringify(item))}, ARRAY_UNDO_LABELS[flat.arrayKey] || 'item');
+    return;
+  }
+  const nested = NESTED_DELETE_UNDO[op.type];
+  if(nested){
+    const parentArr = state[nested.arrayKey] || [];
+    const parent = parentArr.find(x=>x[nested.parentField]===op[nested.parentOpField]);
+    const item = parent && (parent[nested.subKey]||[]).find(x=>x.id===op[nested.subIdField]);
+    if(parent && item) registerUndo('restoreNestedItem', {arrayKey:nested.arrayKey, parentField:nested.parentField, parentValue:op[nested.parentOpField], subKey:nested.subKey, item:JSON.parse(JSON.stringify(item))}, nested.label);
+    return;
+  }
+  if(op.type==='deleteJob') captureJobDeleteUndo(op);
+  else if(op.type==='deleteTeamMember') captureTeamMemberDeleteUndo(op);
+  else if(op.type==='deleteSpec') captureSpecDeleteUndo(op);
+  else if(op.type==='deletePostitColumn') capturePostitColumnDeleteUndo(op);
+}
+let lastUndo = null;
+let undoToastTimer = null;
+function registerUndo(opType, opArgs, label){
+  lastUndo = { opType, opArgs };
+  showUndoToast(label);
+}
+function showUndoToast(label){
+  clearTimeout(undoToastTimer);
+  let el = document.getElementById('undo-toast');
+  if(!el){ el = document.createElement('div'); el.id = 'undo-toast'; el.className = 'undo-toast'; document.body.appendChild(el); }
+  el.innerHTML = `<span>Deleted ${esc(label||'item')}.</span><button class="undo-btn" onclick="performUndo()">Undo</button><button class="undo-x" onclick="hideUndoToast()" aria-label="Dismiss">&times;</button>`;
+  el.classList.remove('show');
+  requestAnimationFrame(()=>el.classList.add('show'));
+  undoToastTimer = setTimeout(hideUndoToast, 12000);
+}
+function hideUndoToast(){
+  const el = document.getElementById('undo-toast');
+  if(el) el.classList.remove('show');
+  clearTimeout(undoToastTimer);
+}
+function performUndo(){
+  if(!lastUndo) return;
+  const { opType, opArgs } = lastUndo;
+  lastUndo = null;
+  hideUndoToast();
+  commit(Object.assign({type: opType}, opArgs));
+}
+
 function commit(op){
+  captureUndoBeforeDelete(op);
   applyOp(op);
   pendingQueue.push(op);
   persistQueue();
@@ -2784,6 +3010,18 @@ function openCount(arr, jobId, doneStates){
 }
 function disabledAttr(){ return readOnly ? 'disabled title="Read-only view — ask the owner for edit access"' : ''; }
 function fmtMoney(n){ return '$' + (n||0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
+// Whole-dollar formatter for Green Sheet figures only, per Greg: "for green
+// sheet values, can you exclude the decimal and cents." Every other dollar
+// amount in the app (invoices, change orders, cost impacts, procurement,
+// etc.) keeps fmtMoney's cents — this is scoped to the Green Sheet rundown,
+// its per-system material detail view, and the Budget and Costs tab (all
+// driven by Green Sheet data), which is what Greg asked to simplify. Cost
+// per Sq Ft (a unit rate, not a total) deliberately keeps cents — rounding
+// a rate like $8.42/sqft to $8 loses real precision the way rounding a
+// $45,231.42 total to $45,231 doesn't. Rounds only for display — the
+// underlying numbers keep full precision everywhere they're stored or
+// computed.
+function fmtMoneyGS(n){ return '$' + Math.round(n||0).toLocaleString(); }
 function hoursPctClass(used, bid){
   if(!bid) return '';
   const pct = used/bid;
@@ -4311,7 +4549,7 @@ function renderOpsContractCostOverview(){
     const open = cos.filter(c=>!CO_OPEN_DONE_STATES.includes(c.status));
     if(!open.length) return null;
     const total = open.reduce((s,c)=>s+(c.cost!=null?Number(c.cost):0),0);
-    return `<div class="log-entry" style="cursor:pointer;" onclick="openJob('${job.id}','costs'); ui.costSubTab='changeorders'; render();">
+    return `<div class="log-entry" style="cursor:pointer;" onclick="openJob('${job.id}','changeorders');">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
         <div style="min-width:0;"><div class="issue-meta">${job.id} — ${esc(job.name)}</div>
         <div style="font-weight:700; font-size:13.5px;">${open.length} open change order${open.length>1?'s':''}${total?` · ${fmtMoney(total)} pending`:''}</div></div>
@@ -4539,6 +4777,7 @@ function renderJob(){
   if(ui.tab==='contacts') body = renderContacts(contacts);
   if(ui.tab==='rfis') body = renderRfis(rfis);
   if(ui.tab==='costs') body = renderCosts(job, issues, invoices, cos, isForeman);
+  if(ui.tab==='changeorders') body = renderCos(job, cos);
   if(ui.tab==='budgetcosts') body = renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes);
   if(ui.tab==='contract') body = renderContract(job);
   if(ui.tab==='hours') body = renderHours(job, hoursEntries, elevations);
@@ -4575,7 +4814,8 @@ function renderJob(){
         {key:'elevations', label:'Elevations', count:incompleteElev},
         {key:'contacts', label:'Contacts'},
         {key:'rfis', label:'RFIs', count:openRfi},
-        {key:'costs', label:'Costs', count:isForeman?openIss:openIss+openInv+openCo},
+        {key:'costs', label:'Costs', count:isForeman?openIss:openIss+openInv},
+        {key:'changeorders', label:'Change Orders', count:openCo},
         {key:'budgetcosts', label:'Budget and Costs'},
         {key:'contract', label:'Contract'},
         {key:'hours', label:'Hours'},
@@ -5286,30 +5526,28 @@ function renderCoLog(job, cos){
     </div>`;
 }
 
-/* ---- Costs (parent tab: cost impacts / invoices / change orders) ---- */
+/* ---- Costs (parent tab: cost impacts / invoices — Change orders moved back
+   out to its own top-level job tab per Greg's request; see 'changeorders' in
+   JOB_TAB_ORDER/OVERRIDABLE_TABS and the tab-bar array in renderJob) ---- */
 function renderCosts(job, issues, invoices, cos, isForeman){
   // A Foreman only ever gets the Cost Impacts sub-tab, with dollar amounts
-  // stripped out (see renderIssues) — Invoices and Change orders stay fully
-  // hidden, same as the rest of Costs was before "costs" was added to
-  // FOREMAN_ALLOWED_TABS. Change orders was already Foreman-hidden as its
-  // own top-level tab (Feature E just moved it in here) — this branch is
-  // exactly what keeps it hidden now that it lives inside a tab a Foreman
-  // can otherwise partially see.
+  // stripped out (see renderIssues) — Invoices stays fully hidden, same as
+  // the rest of Costs was before "costs" was added to FOREMAN_ALLOWED_TABS.
+  // Change orders is its own top-level tab now, Foreman-hidden the normal
+  // way (it isn't in FOREMAN_ALLOWED_TABS) rather than through this branch.
   if(isForeman){
     if(ui.costSubTab && ui.costSubTab!=='impacts') ui.costSubTab = 'impacts';
     return renderIssues(job, issues, true);
   }
-  const sub = ui.costSubTab || 'impacts';
+  const sub = (ui.costSubTab==='invoices') ? 'invoices' : 'impacts';
   const subtabs = `
     <div class="subtabs">
       <div class="subtab ${sub==='impacts'?'active':''}" onclick="setCostSubTab('impacts')">Cost Impacts</div>
       <div class="subtab ${sub==='invoices'?'active':''}" onclick="setCostSubTab('invoices')">Invoices</div>
-      <div class="subtab ${sub==='changeorders'?'active':''}" onclick="setCostSubTab('changeorders')">Change orders</div>
     </div>`;
   let body = '';
   if(sub==='impacts') body = renderIssues(job, issues, false);
   if(sub==='invoices') body = renderInvoices(job, invoices);
-  if(sub==='changeorders') body = renderCos(job, cos);
   return subtabs + body;
 }
 function setCostSubTab(t){ ui.costSubTab = t; render(); }
@@ -5426,13 +5664,13 @@ function renderGreenSheetRundown(job){
         return `
         <div style="${totalsEntries.length>1?'margin-bottom:8px;':''}">
         <div style="display:flex; flex-wrap:wrap; align-items:baseline; gap:24px;">
-          <div style="font-family:var(--disp); font-weight:800; font-size:24px;">${combined!=null?fmtMoney(combined):'—'}</div>
+          <div style="font-family:var(--disp); font-weight:800; font-size:24px;">${combined!=null?fmtMoneyGS(combined):'—'}</div>
           <div style="font-size:15px;"><span style="font-weight:800; font-size:17px;">${t.line.shopHours!=null?t.line.shopHours.toLocaleString():'—'}</span> shop hrs</div>
           <div style="font-size:15px;"><span style="font-weight:800; font-size:17px;">${t.line.fieldHours!=null?t.line.fieldHours.toLocaleString():'—'}</span> field hrs</div>
           ${!readOnly ? `<button class="btn sm secondary" onclick="openGreenSheetLineEdit('${job.id}', ${t.docIdx}, 0)" title="Edit this total">${icon('edit')}</button>` : ''}
           ${totalsEntries.length>1 ? `<div class="issue-meta" style="width:100%;">${esc(t.doc.name)}${t.line.systemName?` — ${esc(t.line.systemName)}`:''}</div>` : ''}
         </div>
-        ${hasSplit ? `<div class="issue-meta" style="margin-top:2px;">Taxable ${fmtMoney(t.line.materialTotal)} + Non-Taxable ${fmtMoney(t.line.materialTotalNonTaxable)}</div>` : ''}
+        ${hasSplit ? `<div class="issue-meta" style="margin-top:2px;">Taxable ${fmtMoneyGS(t.line.materialTotal)} + Non-Taxable ${fmtMoneyGS(t.line.materialTotalNonTaxable)}</div>` : ''}
         </div>`;
       }).join('')}
       ${!readOnly ? `<button class="btn sm safety" style="margin-top:4px;" onclick="applyGreenSheetHoursToJob('${job.id}', ${totalField}, ${totalShop})">${icon('clipboardList')} Apply totals to Bid Hours</button>` : ''}
@@ -5450,7 +5688,7 @@ function renderGreenSheetRundown(job){
     return `<tr onclick="openGreenSheetSystemDetail('${job.id}', ${r.docIdx}, ${r.lineIdx})" style="cursor:pointer;" title="View details for this system">
       <td data-label="System #" class="idcell">${esc(line.systemNo||'—')}</td>
       <td data-label="System">${esc(line.systemName||'—')}${sourceNote}</td>
-      <td data-label="Material Total">${greenSheetLineMaterialCombined(line)!=null?fmtMoney(greenSheetLineMaterialCombined(line)):'—'}</td>
+      <td data-label="Material Total">${greenSheetLineMaterialCombined(line)!=null?fmtMoneyGS(greenSheetLineMaterialCombined(line)):'—'}</td>
       <td data-label="Shop Hours">${line.shopHours!=null?line.shopHours.toLocaleString():'—'}</td>
       <td data-label="Field Hours">${line.fieldHours!=null?line.fieldHours.toLocaleString():'—'}</td>
       <td></td>
@@ -5587,7 +5825,7 @@ function greenSheetSystemDetailHTML(job, doc, docIdx, line, lineIdx){
       <td data-label="Cost Code" class="idcell">${esc(m.costCode)}</td>
       <td data-label="Description of Material">${esc(m.description)}</td>
       <td data-label="Cost per Sq Ft">${m.costPerSqFt!=null?fmtMoney(m.costPerSqFt):'—'}</td>
-      <td data-label="Total Cost">${fmtMoney(m.totalCost)}</td>
+      <td data-label="Total Cost">${fmtMoneyGS(m.totalCost)}</td>
     </tr>`).join('')}</tbody>
     </table>
     </div>` : '';
@@ -5598,10 +5836,10 @@ function greenSheetSystemDetailHTML(job, doc, docIdx, line, lineIdx){
     <div style="display:flex; flex-direction:column; gap:14px; margin:18px 0;">
       ${row('System #', esc(line.systemNo||'—'))}
       ${row('System', esc(line.systemName||'—'))}
-      ${row('Material Total (Taxable)', line.materialTotal!=null?fmtMoney(line.materialTotal):'—')}
-      ${row('Material Total (Non-Taxable)', line.materialTotalNonTaxable!=null?fmtMoney(line.materialTotalNonTaxable):'—')}
-      ${row('Total Material Budget', combined!=null?fmtMoney(combined):'—', true)}
-      ${salesTaxLine ? row('Sales Tax', fmtMoney(salesTaxLine.totalCost)) : ''}
+      ${row('Material Total (Taxable)', line.materialTotal!=null?fmtMoneyGS(line.materialTotal):'—')}
+      ${row('Material Total (Non-Taxable)', line.materialTotalNonTaxable!=null?fmtMoneyGS(line.materialTotalNonTaxable):'—')}
+      ${row('Total Material Budget', combined!=null?fmtMoneyGS(combined):'—', true)}
+      ${salesTaxLine ? row('Sales Tax', fmtMoneyGS(salesTaxLine.totalCost)) : ''}
       ${row('Shop Hours', line.shopHours!=null?line.shopHours.toLocaleString():'—')}
       ${row('Field Hours', line.fieldHours!=null?line.fieldHours.toLocaleString():'—')}
     </div>
@@ -5657,11 +5895,11 @@ function renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes){
     <tr>
       <td data-label="System" class="idcell">${esc(g.system||'—')}</td>
       <td data-label="Scope">${esc(g.scope||'—')}</td>
-      <td data-label="Budget">${fmtMoney(g.budget)}</td>
+      <td data-label="Budget">${fmtMoneyGS(g.budget)}</td>
       <td data-label="Green Sheet code">${g.costCode?esc(g.costCode):'—'}</td>
-      <td data-label="Quoted">${quotedTotal!=null?`${fmtMoney(quotedTotal)}<div class="issue-meta">${quotesForCode.length} quote${quotesForCode.length>1?'s':''}</div>`:'—'}</td>
-      <td data-label="Spent">${spent!=null?fmtMoney(spent):'—'}</td>
-      <td data-label="Remaining">${remaining!=null?fmtMoney(remaining):'—'}</td>
+      <td data-label="Quoted">${quotedTotal!=null?`${fmtMoneyGS(quotedTotal)}<div class="issue-meta">${quotesForCode.length} quote${quotesForCode.length>1?'s':''}</div>`:'—'}</td>
+      <td data-label="Spent">${spent!=null?fmtMoneyGS(spent):'—'}</td>
+      <td data-label="Remaining">${remaining!=null?fmtMoneyGS(remaining):'—'}</td>
       <td data-label="% used">${pct!=null?`<span class="hrs-pct ${cls}">${pct}%</span>`:'—'}</td>
       <td data-label="Notes">${esc(g.notes||'—')}</td>
       <td data-label=""><button class="btn sm secondary" ${disabledAttr()} onclick="deleteGreenSheet('${g.id}')">${icon('trash')}</button></td>
@@ -5673,7 +5911,7 @@ function renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes){
     <tr>
       <td data-label="Green Sheet code" class="idcell">${esc(q.costCode)}${costCodeLabel(q.costCode)?`<div class="issue-meta">${esc(costCodeLabel(q.costCode))}</div>`:''}</td>
       <td data-label="Vendor / supplier">${esc(q.vendor||'—')}</td>
-      <td data-label="Quoted amount">${fmtMoney(q.amount)}</td>
+      <td data-label="Quoted amount">${fmtMoneyGS(q.amount)}</td>
       <td data-label="Date">${q.date||'—'}</td>
       <td data-label="Notes">${esc(q.notes||'—')}</td>
       <td data-label="Docs"><button class="btn sm secondary" onclick="openGSQuoteDetail('${q.id}')">${icon('paperclip')}${docCount?' '+docCount:''}</button></td>
@@ -5701,7 +5939,7 @@ function renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes){
         <div class="field"><label>Scope</label><input id="gs-scope" placeholder="e.g. Storefront &amp; entrances"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Budget ($)</label><input type="number" id="gs-budget" step="0.01" placeholder="0.00"></div>
+        <div class="field"><label>Budget ($)</label><input type="number" id="gs-budget" step="1" placeholder="0"></div>
         <div class="field"><label>Green Sheet code (optional)</label><select id="gs-costcode"><option value="">None</option>${costCodeOptions()}</select></div>
       </div>
       <div class="field"><label>Notes</label><textarea id="gs-notes" placeholder="Anything worth flagging about this system's budget"></textarea></div>
@@ -5720,7 +5958,7 @@ function renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes){
         <div class="field"><label>Vendor / supplier</label><input id="gsq-vendor" placeholder="Who quoted it"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Quoted amount ($)</label><input type="number" id="gsq-amount" step="0.01" placeholder="0.00"></div>
+        <div class="field"><label>Quoted amount ($)</label><input type="number" id="gsq-amount" step="1" placeholder="0"></div>
         <div class="field"><label>Date</label><input type="date" id="gsq-date" value="${todayStr()}"></div>
       </div>
       <div class="field"><label>Notes</label><input id="gsq-notes" placeholder="Scope covered, exclusions, lead time, etc."></div>
@@ -10642,7 +10880,7 @@ function submitCOFillable(){
     sourceIssueId: coSourceIssueId || null
   };
   draftAttachments = [];
-  ui.tab = 'costs'; ui.costSubTab = 'changeorders'; // Feature E: Change orders now lives under Costs
+  ui.tab = 'changeorders'; // Change orders is its own top-level job tab again (Greg's request)
   const cameFromIssue = !!coSourceIssueId;
   if(coSourceIssueId){
     commit({type:'convertIssue', issueId: coSourceIssueId, co: entry});
@@ -10734,7 +10972,7 @@ function convertToCO(issueId){
     cost: issue.cost, scheduleImpact: null, status: 'Draft',
     sourceIssueId: issue.id, attachments: []
   };
-  ui.tab = 'costs'; ui.costSubTab = 'changeorders'; // Feature E: Change orders now lives under Costs
+  ui.tab = 'changeorders'; // Change orders is its own top-level job tab again (Greg's request)
   commit({type:'convertIssue', issueId, co});
   commit({type:'addLog', entry: coLogEntry(co)});
   // Feature J: Greg wants the "Change order" button to actually pull up the
