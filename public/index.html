@@ -4849,8 +4849,8 @@ function renderJob(){
 function renderOverview(job, rfis, cos, issues, logs, hoursEntries, tasks, procurement){
   const recentLog = logs[0];
   const pendingIssues = issues.filter(i=>i.status==='Pending Review');
-  const usedField = hoursEntries.reduce((s,h)=>s+(Number(h.field)||0),0);
-  const usedShop = hoursEntries.reduce((s,h)=>s+(Number(h.shop)||0),0);
+  const usedField = Math.round(hoursEntries.reduce((s,h)=>s+(Number(h.field)||0),0));
+  const usedShop = Math.round(hoursEntries.reduce((s,h)=>s+(Number(h.shop)||0),0));
   return `
     <div class="job-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); margin-bottom:4px;">
       <div class="job-card" style="cursor:default;" onclick="event.stopPropagation()">
@@ -5348,13 +5348,13 @@ function renderContacts(contacts){
 
 /* ---- Hours ---- */
 function renderHours(job, hoursEntries, elevations){
-  const usedField = hoursEntries.reduce((s,h)=>s+(Number(h.field)||0),0);
-  const usedShop = hoursEntries.reduce((s,h)=>s+(Number(h.shop)||0),0);
+  const usedField = Math.round(hoursEntries.reduce((s,h)=>s+(Number(h.field)||0),0));
+  const usedShop = Math.round(hoursEntries.reduce((s,h)=>s+(Number(h.shop)||0),0));
   const rows = hoursEntries.slice().sort((a,b)=>b.month.localeCompare(a.month)).map(h=>`
     <tr>
       <td data-label="Month">${monthLabel(h.month)}</td>
-      <td data-label="Field hrs" class="idcell">${h.field||0}</td>
-      <td data-label="Shop hrs" class="idcell">${h.shop||0}</td>
+      <td data-label="Field hrs" class="idcell">${Math.round(h.field||0)}</td>
+      <td data-label="Shop hrs" class="idcell">${Math.round(h.shop||0)}</td>
       <td data-label=""><button class="btn sm secondary" ${disabledAttr()} onclick="deleteHoursEntry('${h.id}')">${icon('trash')}</button></td>
     </tr>`).join('');
   return `
@@ -5656,8 +5656,8 @@ function renderGreenSheetRundown(job){
     }
   });
   const totalMaterial = totalsEntries.reduce((s,t)=>s+(greenSheetLineMaterialCombined(t.line)||0),0);
-  const totalShop = totalsEntries.reduce((s,t)=>s+(Number(t.line.shopHours)||0),0);
-  const totalField = totalsEntries.reduce((s,t)=>s+(Number(t.line.fieldHours)||0),0);
+  const totalShop = Math.round(totalsEntries.reduce((s,t)=>s+(Number(t.line.shopHours)||0),0));
+  const totalField = Math.round(totalsEntries.reduce((s,t)=>s+(Number(t.line.fieldHours)||0),0));
   const totalsBlock = totalsEntries.length>0 ? `
     <div style="margin:10px 0 18px; padding:14px 16px; background:var(--gray-dim); border:1.5px solid var(--line-strong); border-radius:var(--radius);">
       <div style="font-family:var(--sans); font-weight:700; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted); margin-bottom:8px;">Green Sheet total${totalsEntries.length>1?'s':''} (tab 1 of each workbook)</div>
@@ -5668,8 +5668,8 @@ function renderGreenSheetRundown(job){
         <div style="${totalsEntries.length>1?'margin-bottom:8px;':''}">
         <div style="display:flex; flex-wrap:wrap; align-items:baseline; gap:24px;">
           <div style="font-family:var(--disp); font-weight:800; font-size:24px;">${combined!=null?fmtMoneyWhole(combined):'—'}</div>
-          <div style="font-size:15px;"><span style="font-weight:800; font-size:17px;">${t.line.shopHours!=null?t.line.shopHours.toLocaleString():'—'}</span> shop hrs</div>
-          <div style="font-size:15px;"><span style="font-weight:800; font-size:17px;">${t.line.fieldHours!=null?t.line.fieldHours.toLocaleString():'—'}</span> field hrs</div>
+          <div style="font-size:15px;"><span style="font-weight:800; font-size:17px;">${t.line.shopHours!=null?Math.round(t.line.shopHours).toLocaleString():'—'}</span> shop hrs</div>
+          <div style="font-size:15px;"><span style="font-weight:800; font-size:17px;">${t.line.fieldHours!=null?Math.round(t.line.fieldHours).toLocaleString():'—'}</span> field hrs</div>
           ${!readOnly ? `<button class="btn sm secondary" onclick="openGreenSheetLineEdit('${job.id}', ${t.docIdx}, 0)" title="Edit this total">${icon('edit')}</button>` : ''}
           ${totalsEntries.length>1 ? `<div class="issue-meta" style="width:100%;">${esc(t.doc.name)}${t.line.systemName?` — ${esc(t.line.systemName)}`:''}</div>` : ''}
         </div>
@@ -5692,8 +5692,8 @@ function renderGreenSheetRundown(job){
       <td data-label="System #" class="idcell">${esc(line.systemNo||'—')}</td>
       <td data-label="System">${esc(line.systemName||'—')}${sourceNote}</td>
       <td data-label="Material Total">${greenSheetLineMaterialCombined(line)!=null?fmtMoneyWhole(greenSheetLineMaterialCombined(line)):'—'}</td>
-      <td data-label="Shop Hours">${line.shopHours!=null?line.shopHours.toLocaleString():'—'}</td>
-      <td data-label="Field Hours">${line.fieldHours!=null?line.fieldHours.toLocaleString():'—'}</td>
+      <td data-label="Shop Hours">${line.shopHours!=null?Math.round(line.shopHours).toLocaleString():'—'}</td>
+      <td data-label="Field Hours">${line.fieldHours!=null?Math.round(line.fieldHours).toLocaleString():'—'}</td>
       <td></td>
       <td data-label="" onclick="event.stopPropagation();">${editBtn}</td>
     </tr>`;
@@ -5843,8 +5843,8 @@ function greenSheetSystemDetailHTML(job, doc, docIdx, line, lineIdx){
       ${row('Material Total (Non-Taxable)', line.materialTotalNonTaxable!=null?fmtMoneyWhole(line.materialTotalNonTaxable):'—')}
       ${row('Total Material Budget', combined!=null?fmtMoneyWhole(combined):'—', true)}
       ${salesTaxLine ? row('Sales Tax', fmtMoneyWhole(salesTaxLine.totalCost)) : ''}
-      ${row('Shop Hours', line.shopHours!=null?line.shopHours.toLocaleString():'—')}
-      ${row('Field Hours', line.fieldHours!=null?line.fieldHours.toLocaleString():'—')}
+      ${row('Shop Hours', line.shopHours!=null?Math.round(line.shopHours).toLocaleString():'—')}
+      ${row('Field Hours', line.fieldHours!=null?Math.round(line.fieldHours).toLocaleString():'—')}
     </div>
     ${materialGroupTable('Taxable material', taxableLines)}
     ${materialGroupTable('Non-taxable material (shop drawings, engineering, freight, and similar)', nonTaxableLines)}
@@ -5865,8 +5865,8 @@ function submitGreenSheetLine(){
     systemNo, systemName,
     materialTotal: mat===''?null:Number(mat),
     materialTotalNonTaxable: matNonTax===''?null:Number(matNonTax),
-    shopHours: shop===''?null:Number(shop),
-    fieldHours: field===''?null:Number(field),
+    shopHours: shop===''?null:Math.round(Number(shop)),
+    fieldHours: field===''?null:Math.round(Number(field)),
   }});
   ui.gsEditRef = null;
   closeModal();
@@ -6106,8 +6106,8 @@ async function parseGreenSheetWorkbook(file){
         systemName: systemName!=null ? String(systemName) : '',
         materialTotal: isNaN(materialTotal) ? null : materialTotal,
         materialTotalNonTaxable: isNaN(materialTotalNonTaxable) ? null : materialTotalNonTaxable,
-        shopHours: isNaN(shopHours) ? null : shopHours,
-        fieldHours: isNaN(fieldHours) ? null : fieldHours,
+        shopHours: isNaN(shopHours) ? null : Math.round(shopHours),
+        fieldHours: isNaN(fieldHours) ? null : Math.round(fieldHours),
         materialLines: parseGreenSheetMaterialLines(ws),
       });
     }
@@ -8970,8 +8970,8 @@ function modalHTML(type){
         <div class="field"><label>Material Total (Non-Taxable)</label><input type="number" id="f-gs-material-nontax" value="${line.materialTotalNonTaxable!=null?line.materialTotalNonTaxable:''}" placeholder="0" step="0.01"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Shop Hours</label><input type="number" id="f-gs-shop" value="${line.shopHours!=null?line.shopHours:''}" placeholder="0" step="0.5"></div>
-        <div class="field"><label>Field Hours</label><input type="number" id="f-gs-field" value="${line.fieldHours!=null?line.fieldHours:''}" placeholder="0" step="0.5"></div>
+        <div class="field"><label>Shop Hours</label><input type="number" id="f-gs-shop" value="${line.shopHours!=null?line.shopHours:''}" placeholder="0" step="1"></div>
+        <div class="field"><label>Field Hours</label><input type="number" id="f-gs-field" value="${line.fieldHours!=null?line.fieldHours:''}" placeholder="0" step="1"></div>
       </div>
       <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Cancel</button>
       <button class="btn safety" onclick="submitGreenSheetLine()">Save</button></div>
@@ -8982,8 +8982,8 @@ function modalHTML(type){
       <h3>Log monthly hours</h3><p class="sub">${ui.jobId} — logging for a month that already has an entry updates it instead of duplicating.</p>
       <div class="field"><label>Month</label><input type="month" id="f-month" value="${currentMonthStr()}"></div>
       <div class="field-row">
-        <div class="field"><label>Field hours</label><input type="number" id="f-field" placeholder="0" min="0" step="0.5"></div>
-        <div class="field"><label>Shop hours</label><input type="number" id="f-shop" placeholder="0" min="0" step="0.5"></div>
+        <div class="field"><label>Field hours</label><input type="number" id="f-field" placeholder="0" min="0" step="1"></div>
+        <div class="field"><label>Shop hours</label><input type="number" id="f-shop" placeholder="0" min="0" step="1"></div>
       </div>
       <div class="err" id="f-err"></div>
       <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Cancel</button>
@@ -10704,8 +10704,8 @@ function submitBudget(){
 function submitHours(){
   const month = document.getElementById('f-month').value;
   if(!month) return showErr('Pick a month.');
-  const field = Number(document.getElementById('f-field').value)||0;
-  const shop = Number(document.getElementById('f-shop').value)||0;
+  const field = Math.round(Number(document.getElementById('f-field').value)||0);
+  const shop = Math.round(Number(document.getElementById('f-shop').value)||0);
   const existing = state.hours.find(h=>h.jobId===ui.jobId && h.month===month);
   const entry = existing ? Object.assign({}, existing, {field, shop}) : {id: nextId('hours', ui.jobId, 'HRS'), jobId: ui.jobId, month, field, shop};
   commit({type:'upsertHours', entry});
