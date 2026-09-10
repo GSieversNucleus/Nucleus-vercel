@@ -3010,18 +3010,21 @@ function openCount(arr, jobId, doneStates){
 }
 function disabledAttr(){ return readOnly ? 'disabled title="Read-only view — ask the owner for edit access"' : ''; }
 function fmtMoney(n){ return '$' + (n||0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
-// Whole-dollar formatter for Green Sheet figures only, per Greg: "for green
-// sheet values, can you exclude the decimal and cents." Every other dollar
-// amount in the app (invoices, change orders, cost impacts, procurement,
-// etc.) keeps fmtMoney's cents — this is scoped to the Green Sheet rundown,
-// its per-system material detail view, and the Budget and Costs tab (all
-// driven by Green Sheet data), which is what Greg asked to simplify. Cost
-// per Sq Ft (a unit rate, not a total) deliberately keeps cents — rounding
-// a rate like $8.42/sqft to $8 loses real precision the way rounding a
-// $45,231.42 total to $45,231 doesn't. Rounds only for display — the
-// underlying numbers keep full precision everywhere they're stored or
-// computed.
-function fmtMoneyGS(n){ return '$' + Math.round(n||0).toLocaleString(); }
+// Whole-dollar formatter, per Greg: first for Green Sheet values ("for
+// green sheet values, can you exclude the decimal and cents"), then
+// extended to Change Orders ("in the change orders, please take out the
+// decimal point... only include dollars and not cents"). Scoped to: the
+// Green Sheet rundown, its per-system material detail view, the Budget and
+// Costs tab (all driven by Green Sheet data), and every Change Order
+// display/input (cards, log view, CO detail, the quick-add and full CO
+// request forms, line-item extensions, and the Operations Manager digest's
+// open-CO total). Every other dollar amount in the app (invoices, cost
+// impacts, procurement, etc.) keeps fmtMoney's cents. Cost per Sq Ft (a
+// unit rate, not a total) deliberately keeps cents — rounding a rate like
+// $8.42/sqft to $8 loses real precision the way rounding a $45,231.42
+// total to $45,231 doesn't. Rounds only for display — the underlying
+// numbers keep full precision everywhere they're stored or computed.
+function fmtMoneyWhole(n){ return '$' + Math.round(n||0).toLocaleString(); }
 function hoursPctClass(used, bid){
   if(!bid) return '';
   const pct = used/bid;
@@ -4552,7 +4555,7 @@ function renderOpsContractCostOverview(){
     return `<div class="log-entry" style="cursor:pointer;" onclick="openJob('${job.id}','changeorders');">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
         <div style="min-width:0;"><div class="issue-meta">${job.id} — ${esc(job.name)}</div>
-        <div style="font-weight:700; font-size:13.5px;">${open.length} open change order${open.length>1?'s':''}${total?` · ${fmtMoney(total)} pending`:''}</div></div>
+        <div style="font-weight:700; font-size:13.5px;">${open.length} open change order${open.length>1?'s':''}${total?` · ${fmtMoneyWhole(total)} pending`:''}</div></div>
         <div class="hrs-pct warn">${open.length}</div>
       </div>
     </div>`;
@@ -5463,7 +5466,7 @@ function renderCos(job, cos){
     <tr onclick="openCODetail('${c.id}')" style="cursor:pointer;">
       <td data-label="ID" class="idcell">${esc(coNumber(c))}</td>
       <td data-label="Description">${esc(c.description)}${c.sourceIssueId?`<div class="issue-meta">From ${c.sourceIssueId}</div>`:''}${c.attachments&&c.attachments.length?`<div class="issue-meta">${icon('paperclip')} ${c.attachments.length} PDF${c.attachments.length>1?'s':''}</div>`:''}</td>
-      <td data-label="Cost impact">${c.cost!=null?'$'+Number(c.cost).toLocaleString():'—'}</td>
+      <td data-label="Cost impact">${c.cost!=null?fmtMoneyWhole(c.cost):'—'}</td>
       <td data-label="Schedule">${c.scheduleImpact?c.scheduleImpact+' days':'—'}</td>
       <td data-label="Status">${badge(c.status)}${c.scoNumber?`<div class="issue-meta">SCO ${esc(c.scoNumber)}</div>`:''}</td>
     </tr>`).join('');
@@ -5484,9 +5487,9 @@ function renderCoLog(job, cos){
       <td data-label="G.C. #" class="center">${c.gcNumber?esc(c.gcNumber):'—'}</td>
       <td data-label="Date" class="center">${c.date||'—'}</td>
       <td data-label="Description" class="desc">${esc(c.description)}</td>
-      <td data-label="Quoted" class="num">${cols.quoted!=null?fmtMoney(cols.quoted):'—'}</td>
-      <td data-label="Pending" class="num">${cols.pending!=null?fmtMoney(cols.pending):'—'}</td>
-      <td data-label="Approved" class="num">${cols.approved!=null?fmtMoney(cols.approved):'—'}</td>
+      <td data-label="Quoted" class="num">${cols.quoted!=null?fmtMoneyWhole(cols.quoted):'—'}</td>
+      <td data-label="Pending" class="num">${cols.pending!=null?fmtMoneyWhole(cols.pending):'—'}</td>
+      <td data-label="Approved" class="num">${cols.approved!=null?fmtMoneyWhole(cols.approved):'—'}</td>
       <td data-label="Status" class="center">${badge(c.status)}</td>
       <td data-label="SCO #" class="center">${c.scoNumber?esc(c.scoNumber):'—'}</td>
       <td data-label="Notes / RFI Ref#">${c.notes?esc(c.notes):'—'}</td>
@@ -5512,9 +5515,9 @@ function renderCoLog(job, cos){
         <tbody>${rows}</tbody>
         <tfoot><tr>
           <td colspan="4" style="text-align:right;">Totals</td>
-          <td class="num" data-label="Quoted">${fmtMoney(totQuoted)}</td>
-          <td class="num" data-label="Pending">${fmtMoney(totPending)}</td>
-          <td class="num" data-label="Approved">${fmtMoney(totApproved)}</td>
+          <td class="num" data-label="Quoted">${fmtMoneyWhole(totQuoted)}</td>
+          <td class="num" data-label="Pending">${fmtMoneyWhole(totPending)}</td>
+          <td class="num" data-label="Approved">${fmtMoneyWhole(totApproved)}</td>
           <td colspan="3"></td>
         </tr></tfoot>
       </table>
@@ -5664,13 +5667,13 @@ function renderGreenSheetRundown(job){
         return `
         <div style="${totalsEntries.length>1?'margin-bottom:8px;':''}">
         <div style="display:flex; flex-wrap:wrap; align-items:baseline; gap:24px;">
-          <div style="font-family:var(--disp); font-weight:800; font-size:24px;">${combined!=null?fmtMoneyGS(combined):'—'}</div>
+          <div style="font-family:var(--disp); font-weight:800; font-size:24px;">${combined!=null?fmtMoneyWhole(combined):'—'}</div>
           <div style="font-size:15px;"><span style="font-weight:800; font-size:17px;">${t.line.shopHours!=null?t.line.shopHours.toLocaleString():'—'}</span> shop hrs</div>
           <div style="font-size:15px;"><span style="font-weight:800; font-size:17px;">${t.line.fieldHours!=null?t.line.fieldHours.toLocaleString():'—'}</span> field hrs</div>
           ${!readOnly ? `<button class="btn sm secondary" onclick="openGreenSheetLineEdit('${job.id}', ${t.docIdx}, 0)" title="Edit this total">${icon('edit')}</button>` : ''}
           ${totalsEntries.length>1 ? `<div class="issue-meta" style="width:100%;">${esc(t.doc.name)}${t.line.systemName?` — ${esc(t.line.systemName)}`:''}</div>` : ''}
         </div>
-        ${hasSplit ? `<div class="issue-meta" style="margin-top:2px;">Taxable ${fmtMoneyGS(t.line.materialTotal)} + Non-Taxable ${fmtMoneyGS(t.line.materialTotalNonTaxable)}</div>` : ''}
+        ${hasSplit ? `<div class="issue-meta" style="margin-top:2px;">Taxable ${fmtMoneyWhole(t.line.materialTotal)} + Non-Taxable ${fmtMoneyWhole(t.line.materialTotalNonTaxable)}</div>` : ''}
         </div>`;
       }).join('')}
       ${!readOnly ? `<button class="btn sm safety" style="margin-top:4px;" onclick="applyGreenSheetHoursToJob('${job.id}', ${totalField}, ${totalShop})">${icon('clipboardList')} Apply totals to Bid Hours</button>` : ''}
@@ -5688,7 +5691,7 @@ function renderGreenSheetRundown(job){
     return `<tr onclick="openGreenSheetSystemDetail('${job.id}', ${r.docIdx}, ${r.lineIdx})" style="cursor:pointer;" title="View details for this system">
       <td data-label="System #" class="idcell">${esc(line.systemNo||'—')}</td>
       <td data-label="System">${esc(line.systemName||'—')}${sourceNote}</td>
-      <td data-label="Material Total">${greenSheetLineMaterialCombined(line)!=null?fmtMoneyGS(greenSheetLineMaterialCombined(line)):'—'}</td>
+      <td data-label="Material Total">${greenSheetLineMaterialCombined(line)!=null?fmtMoneyWhole(greenSheetLineMaterialCombined(line)):'—'}</td>
       <td data-label="Shop Hours">${line.shopHours!=null?line.shopHours.toLocaleString():'—'}</td>
       <td data-label="Field Hours">${line.fieldHours!=null?line.fieldHours.toLocaleString():'—'}</td>
       <td></td>
@@ -5825,7 +5828,7 @@ function greenSheetSystemDetailHTML(job, doc, docIdx, line, lineIdx){
       <td data-label="Cost Code" class="idcell">${esc(m.costCode)}</td>
       <td data-label="Description of Material">${esc(m.description)}</td>
       <td data-label="Cost per Sq Ft">${m.costPerSqFt!=null?fmtMoney(m.costPerSqFt):'—'}</td>
-      <td data-label="Total Cost">${fmtMoneyGS(m.totalCost)}</td>
+      <td data-label="Total Cost">${fmtMoneyWhole(m.totalCost)}</td>
     </tr>`).join('')}</tbody>
     </table>
     </div>` : '';
@@ -5836,10 +5839,10 @@ function greenSheetSystemDetailHTML(job, doc, docIdx, line, lineIdx){
     <div style="display:flex; flex-direction:column; gap:14px; margin:18px 0;">
       ${row('System #', esc(line.systemNo||'—'))}
       ${row('System', esc(line.systemName||'—'))}
-      ${row('Material Total (Taxable)', line.materialTotal!=null?fmtMoneyGS(line.materialTotal):'—')}
-      ${row('Material Total (Non-Taxable)', line.materialTotalNonTaxable!=null?fmtMoneyGS(line.materialTotalNonTaxable):'—')}
-      ${row('Total Material Budget', combined!=null?fmtMoneyGS(combined):'—', true)}
-      ${salesTaxLine ? row('Sales Tax', fmtMoneyGS(salesTaxLine.totalCost)) : ''}
+      ${row('Material Total (Taxable)', line.materialTotal!=null?fmtMoneyWhole(line.materialTotal):'—')}
+      ${row('Material Total (Non-Taxable)', line.materialTotalNonTaxable!=null?fmtMoneyWhole(line.materialTotalNonTaxable):'—')}
+      ${row('Total Material Budget', combined!=null?fmtMoneyWhole(combined):'—', true)}
+      ${salesTaxLine ? row('Sales Tax', fmtMoneyWhole(salesTaxLine.totalCost)) : ''}
       ${row('Shop Hours', line.shopHours!=null?line.shopHours.toLocaleString():'—')}
       ${row('Field Hours', line.fieldHours!=null?line.fieldHours.toLocaleString():'—')}
     </div>
@@ -5895,11 +5898,11 @@ function renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes){
     <tr>
       <td data-label="System" class="idcell">${esc(g.system||'—')}</td>
       <td data-label="Scope">${esc(g.scope||'—')}</td>
-      <td data-label="Budget">${fmtMoneyGS(g.budget)}</td>
+      <td data-label="Budget">${fmtMoneyWhole(g.budget)}</td>
       <td data-label="Green Sheet code">${g.costCode?esc(g.costCode):'—'}</td>
-      <td data-label="Quoted">${quotedTotal!=null?`${fmtMoneyGS(quotedTotal)}<div class="issue-meta">${quotesForCode.length} quote${quotesForCode.length>1?'s':''}</div>`:'—'}</td>
-      <td data-label="Spent">${spent!=null?fmtMoneyGS(spent):'—'}</td>
-      <td data-label="Remaining">${remaining!=null?fmtMoneyGS(remaining):'—'}</td>
+      <td data-label="Quoted">${quotedTotal!=null?`${fmtMoneyWhole(quotedTotal)}<div class="issue-meta">${quotesForCode.length} quote${quotesForCode.length>1?'s':''}</div>`:'—'}</td>
+      <td data-label="Spent">${spent!=null?fmtMoneyWhole(spent):'—'}</td>
+      <td data-label="Remaining">${remaining!=null?fmtMoneyWhole(remaining):'—'}</td>
       <td data-label="% used">${pct!=null?`<span class="hrs-pct ${cls}">${pct}%</span>`:'—'}</td>
       <td data-label="Notes">${esc(g.notes||'—')}</td>
       <td data-label=""><button class="btn sm secondary" ${disabledAttr()} onclick="deleteGreenSheet('${g.id}')">${icon('trash')}</button></td>
@@ -5911,7 +5914,7 @@ function renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes){
     <tr>
       <td data-label="Green Sheet code" class="idcell">${esc(q.costCode)}${costCodeLabel(q.costCode)?`<div class="issue-meta">${esc(costCodeLabel(q.costCode))}</div>`:''}</td>
       <td data-label="Vendor / supplier">${esc(q.vendor||'—')}</td>
-      <td data-label="Quoted amount">${fmtMoneyGS(q.amount)}</td>
+      <td data-label="Quoted amount">${fmtMoneyWhole(q.amount)}</td>
       <td data-label="Date">${q.date||'—'}</td>
       <td data-label="Notes">${esc(q.notes||'—')}</td>
       <td data-label="Docs"><button class="btn sm secondary" onclick="openGSQuoteDetail('${q.id}')">${icon('paperclip')}${docCount?' '+docCount:''}</button></td>
@@ -9333,7 +9336,7 @@ function modalHTML(type){
       <h3>Quick add change order</h3><p class="sub">${ui.jobId} — auto-numbered as ${ui.jobId}-CO-###. For the full itemized form, use "New CO request" instead.</p>
       <div class="field"><label>Description</label><textarea id="f-desc" placeholder="What changed and why"></textarea></div>
       <div class="field-row">
-        <div class="field"><label>Cost impact ($)</label><input type="number" id="f-cost" placeholder="0.00"></div>
+        <div class="field"><label>Cost impact ($)</label><input type="number" id="f-cost" step="1" placeholder="0"></div>
         <div class="field"><label>Schedule impact (days)</label><input type="number" id="f-sched" placeholder="0"></div>
       </div>
       <div class="field-row">
@@ -9376,7 +9379,7 @@ function modalHTML(type){
       <button type="button" class="btn sm secondary" onclick="addRow('mat-rows')">${icon('plus')} Add material line</button>
       <div class="field-row" style="margin-top:12px;">
         <div class="field"><label>Sales tax %</label><input type="number" id="co-tax" value="9.13" step="0.01" oninput="recalcCO()"></div>
-        <div class="field"><label>Freight ($)</label><input type="number" id="co-freight" value="0" step="0.01" oninput="recalcCO()"></div>
+        <div class="field"><label>Freight ($)</label><input type="number" id="co-freight" value="0" step="1" oninput="recalcCO()"></div>
       </div>
 
       <div class="section-title">Engineering</div>
@@ -9397,16 +9400,16 @@ function modalHTML(type){
       <div class="field" style="margin-top:14px; max-width:180px;"><label>Overhead and profit %</label><input type="number" id="co-ohp" value="11.6" step="0.01" oninput="recalcCO()"></div>
 
       <div class="co-summary">
-        <div class="row"><span>Material subtotal</span><span id="sum-matsub">$0.00</span></div>
-        <div class="row"><span>Sales tax</span><span id="sum-tax">$0.00</span></div>
-        <div class="row"><span>Freight</span><span id="sum-freight">$0.00</span></div>
-        <div class="row"><span>Total material</span><span id="sum-totalmat">$0.00</span></div>
-        <div class="row"><span>Total engineering</span><span id="sum-eng">$0.00</span></div>
-        <div class="row"><span>Total equipment</span><span id="sum-equip">$0.00</span></div>
-        <div class="row"><span>Total labor</span><span id="sum-labor">$0.00</span></div>
-        <div class="row"><span>Total before overhead and profit</span><span id="sum-beforeoh">$0.00</span></div>
-        <div class="row"><span>Overhead and profit</span><span id="sum-oh">$0.00</span></div>
-        <div class="row total"><span>Total request</span><span id="sum-total">$0.00</span></div>
+        <div class="row"><span>Material subtotal</span><span id="sum-matsub">$0</span></div>
+        <div class="row"><span>Sales tax</span><span id="sum-tax">$0</span></div>
+        <div class="row"><span>Freight</span><span id="sum-freight">$0</span></div>
+        <div class="row"><span>Total material</span><span id="sum-totalmat">$0</span></div>
+        <div class="row"><span>Total engineering</span><span id="sum-eng">$0</span></div>
+        <div class="row"><span>Total equipment</span><span id="sum-equip">$0</span></div>
+        <div class="row"><span>Total labor</span><span id="sum-labor">$0</span></div>
+        <div class="row"><span>Total before overhead and profit</span><span id="sum-beforeoh">$0</span></div>
+        <div class="row"><span>Overhead and profit</span><span id="sum-oh">$0</span></div>
+        <div class="row total"><span>Total request</span><span id="sum-total">$0</span></div>
       </div>
 
       <div class="field" style="margin-top:14px;"><label>Notes / RFI ref#</label><input id="f-notes" placeholder="e.g. See RFI-12 (optional)"></div>
@@ -9554,8 +9557,8 @@ function buildLineRow(prefill){
     <td><input type="text" class="li-desc" placeholder="Description" value="${pDesc}"></td>
     <td><input type="number" class="li-qty num" placeholder="0" value="${pQty}" oninput="recalcCO()"></td>
     <td><input type="text" class="li-unit" placeholder="ea" value="${pUnit}"></td>
-    <td><input type="number" class="li-price num" placeholder="0.00" step="0.01" value="${pPrice}" oninput="recalcCO()"></td>
-    <td class="li-ext" id="${rid}-ext">$0.00</td>
+    <td><input type="number" class="li-price num" placeholder="0" step="1" value="${pPrice}" oninput="recalcCO()"></td>
+    <td class="li-ext" id="${rid}-ext">$0</td>
     <td><button type="button" class="li-remove" onclick="removeRow('${rid}')" aria-label="Remove line">&times;</button></td>
   </tr>`;
 }
@@ -9578,7 +9581,7 @@ function sectionTotal(bodyId){
     const price = parseFloat(tr.querySelector('.li-price').value) || 0;
     const ext = qty * price;
     const extCell = tr.querySelector('.li-ext');
-    if(extCell) extCell.textContent = fmtMoney(ext);
+    if(extCell) extCell.textContent = fmtMoneyWhole(ext);
     sum += ext;
   });
   return sum;
@@ -9596,7 +9599,7 @@ function recalcCO(){
   const totalBeforeOH = totalMaterial + engSub + equipSub + laborSub;
   const ohAmt = totalBeforeOH * (ohpPct/100);
   const totalRequest = totalBeforeOH + ohAmt;
-  const set = (id,val)=>{ const el=document.getElementById(id); if(el) el.textContent = fmtMoney(val); };
+  const set = (id,val)=>{ const el=document.getElementById(id); if(el) el.textContent = fmtMoneyWhole(val); };
   set('sum-matsub', matSub); set('sum-tax', tax); set('sum-freight', freight);
   set('sum-totalmat', totalMaterial); set('sum-eng', engSub); set('sum-equip', equipSub);
   set('sum-labor', laborSub); set('sum-beforeoh', totalBeforeOH); set('sum-oh', ohAmt); set('sum-total', totalRequest);
@@ -9704,7 +9707,7 @@ function coDetailHTML(co){
   const lineTable = (arr, label) => (arr && arr.length) ? `
     <div class="co-detail-section"><div class="section-title">${label}</div>
     <table class="li-table"><thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th>Price</th><th>Ext</th></tr></thead>
-    <tbody>${arr.map(r=>`<tr><td>${esc(r.desc||'—')}</td><td>${r.qty||'—'}</td><td>${esc(r.unit||'—')}</td><td>${fmtMoney(r.price)}</td><td>${fmtMoney(r.ext)}</td></tr>`).join('')}</tbody></table></div>` : '';
+    <tbody>${arr.map(r=>`<tr><td>${esc(r.desc||'—')}</td><td>${r.qty||'—'}</td><td>${esc(r.unit||'—')}</td><td>${fmtMoneyWhole(r.price)}</td><td>${fmtMoneyWhole(r.ext)}</td></tr>`).join('')}</tbody></table></div>` : '';
   // Editable line-item section for a detailed CO — same table/row markup
   // as the create-CO form (buildLineRow/addRow/removeRow/recalcCO, all
   // already generic over a body id), so editing works exactly like
@@ -9744,7 +9747,7 @@ function coDetailHTML(co){
         ${editableSection('mat-rows', co.materials, 'Material')}
         <div class="field-row" style="margin-top:12px;">
           <div class="field"><label>Sales tax %</label><input type="number" id="co-tax" value="${co.taxPct!=null?co.taxPct:9.13}" step="0.01" oninput="recalcCO()"></div>
-          <div class="field"><label>Freight ($)</label><input type="number" id="co-freight" value="${co.freight!=null?co.freight:0}" step="0.01" oninput="recalcCO()"></div>
+          <div class="field"><label>Freight ($)</label><input type="number" id="co-freight" value="${co.freight!=null?co.freight:0}" step="1" oninput="recalcCO()"></div>
         </div>
         ${editableSection('eng-rows', co.engineering, 'Engineering')}
         ${editableSection('equip-rows', co.equipment, 'Equipment', 'Rate')}
@@ -9753,33 +9756,33 @@ function coDetailHTML(co){
       `}
       <div class="co-summary">
         ${readOnly ? `
-        <div class="row"><span>Total material</span><span>${fmtMoney(co.totals?.totalMaterial)}</span></div>
-        <div class="row"><span>Total engineering</span><span>${fmtMoney(co.totals?.engSub)}</span></div>
-        <div class="row"><span>Total equipment</span><span>${fmtMoney(co.totals?.equipSub)}</span></div>
-        <div class="row"><span>Total labor</span><span>${fmtMoney(co.totals?.laborSub)}</span></div>
-        <div class="row total"><span>Total request</span><span>${fmtMoney(co.cost)}</span></div>
+        <div class="row"><span>Total material</span><span>${fmtMoneyWhole(co.totals?.totalMaterial)}</span></div>
+        <div class="row"><span>Total engineering</span><span>${fmtMoneyWhole(co.totals?.engSub)}</span></div>
+        <div class="row"><span>Total equipment</span><span>${fmtMoneyWhole(co.totals?.equipSub)}</span></div>
+        <div class="row"><span>Total labor</span><span>${fmtMoneyWhole(co.totals?.laborSub)}</span></div>
+        <div class="row total"><span>Total request</span><span>${fmtMoneyWhole(co.cost)}</span></div>
         ` : `
-        <div class="row"><span>Material subtotal</span><span id="sum-matsub">$0.00</span></div>
-        <div class="row"><span>Sales tax</span><span id="sum-tax">$0.00</span></div>
-        <div class="row"><span>Freight</span><span id="sum-freight">$0.00</span></div>
-        <div class="row"><span>Total material</span><span id="sum-totalmat">$0.00</span></div>
-        <div class="row"><span>Total engineering</span><span id="sum-eng">$0.00</span></div>
-        <div class="row"><span>Total equipment</span><span id="sum-equip">$0.00</span></div>
-        <div class="row"><span>Total labor</span><span id="sum-labor">$0.00</span></div>
-        <div class="row"><span>Total before overhead and profit</span><span id="sum-beforeoh">$0.00</span></div>
-        <div class="row"><span>Overhead and profit</span><span id="sum-oh">$0.00</span></div>
-        <div class="row total"><span>Total request</span><span id="sum-total">$0.00</span></div>
+        <div class="row"><span>Material subtotal</span><span id="sum-matsub">$0</span></div>
+        <div class="row"><span>Sales tax</span><span id="sum-tax">$0</span></div>
+        <div class="row"><span>Freight</span><span id="sum-freight">$0</span></div>
+        <div class="row"><span>Total material</span><span id="sum-totalmat">$0</span></div>
+        <div class="row"><span>Total engineering</span><span id="sum-eng">$0</span></div>
+        <div class="row"><span>Total equipment</span><span id="sum-equip">$0</span></div>
+        <div class="row"><span>Total labor</span><span id="sum-labor">$0</span></div>
+        <div class="row"><span>Total before overhead and profit</span><span id="sum-beforeoh">$0</span></div>
+        <div class="row"><span>Overhead and profit</span><span id="sum-oh">$0</span></div>
+        <div class="row total"><span>Total request</span><span id="sum-total">$0</span></div>
         `}
       </div>
       ${readOnly ? '' : `<button class="btn sm safety" style="margin-top:10px;" onclick="saveCOLineItems('${co.id}')">Save line items</button>`}
       ` : `
       <div class="co-summary" style="margin-top:10px;">
         ${readOnly ? `
-        <div class="row"><span>Cost impact</span><span>${co.cost!=null?fmtMoney(co.cost):'—'}</span></div>
+        <div class="row"><span>Cost impact</span><span>${co.cost!=null?fmtMoneyWhole(co.cost):'—'}</span></div>
         <div class="row"><span>Schedule impact</span><span>${co.scheduleImpact?co.scheduleImpact+' days':'—'}</span></div>
         ` : `
         <div class="field-row">
-          <div class="field"><label>Cost impact ($)</label><input type="number" id="co-detail-cost" value="${co.cost!=null?co.cost:''}" placeholder="0.00" onchange="updateCOField('${co.id}','cost',this.value===''?null:Number(this.value))"></div>
+          <div class="field"><label>Cost impact ($)</label><input type="number" id="co-detail-cost" value="${co.cost!=null?co.cost:''}" step="1" placeholder="0" onchange="updateCOField('${co.id}','cost',this.value===''?null:Number(this.value))"></div>
           <div class="field"><label>Schedule impact (days)</label><input type="number" id="co-detail-sched" value="${co.scheduleImpact!=null?co.scheduleImpact:''}" placeholder="0" onchange="updateCOField('${co.id}','scheduleImpact',this.value||null)"></div>
         </div>
         `}
