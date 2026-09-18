@@ -842,6 +842,24 @@
 .td-subj.s-order{background:var(--amber-dim);color:var(--amber-dark)}
 .td-subj.s-change-order{background:var(--safety-dim);color:var(--safety-dark)}
 .td-subj.s-log-inefficiencies{background:var(--gc-dim);color:var(--gc-dark)}
+/* ---- GC schedule reference / Activity ID picker ---- */
+.gc-schedhead{display:flex;align-items:flex-start;gap:12px;justify-content:space-between;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--card,#fff);margin:0 0 10px}
+.gc-findbar{display:flex;gap:8px;margin:0 0 10px;flex-wrap:wrap}
+.gc-findbar input{flex:1;min-width:220px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:13px;background:var(--paper)}
+.gc-actlist{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.gc-act{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap;padding:7px 11px;border-bottom:1px solid var(--line);background:var(--card,#fff)}
+.gc-act:last-child{border-bottom:0}
+.gc-act.picked{background:var(--steel-dim)}
+.gc-act.used{opacity:.62}
+.gc-act label{display:flex;align-items:center;gap:9px;margin:0;cursor:pointer;flex:1;min-width:0}
+.gc-act input[type=checkbox]{width:17px;height:17px;margin:0;flex:none;cursor:pointer}
+.gc-actid{font-family:var(--mono);font-size:12.5px;font-weight:700;flex:none}
+.gc-actname{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gc-actmeta{font-size:11px;letter-spacing:.03em;color:var(--text-muted);white-space:nowrap;flex:none}
+.gc-actbar{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+.gc-actbar .spacer{flex:1}
+.task-actid{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.03em;padding:1px 5px;border-radius:4px;background:var(--steel-dim);color:var(--steel-dark);white-space:nowrap}
+@media (max-width:620px){ .gc-actmeta{width:100%;white-space:normal} .gc-actname{white-space:normal} }
 </style>
 
 <div class="topbar">
@@ -1580,8 +1598,8 @@ function searchApp(query){
       .map(sp=>({jobId:sp.jobId, tab:'specs', title:`${sp.section||''} ${sp.title||''}`.trim(), snippet:jobLabel(sp.jobId)}))
     .concat(state.submittals.filter(su=>inScope(su.jobId) && matches(su.id,su.description,su.to,su.re,su.attn,su.remarks))
       .map(su=>({jobId:su.jobId, tab:'specs', title:`${su.id} — ${su.description}`, snippet:jobLabel(su.jobId)}))));
-  pushGroup('Field Schedule', state.schedule.filter(t=>inScope(t.jobId) && matches(t.id,t.name,t.trade))
-    .map(t=>({jobId:t.jobId, tab:'schedule', title:`${t.id} — ${t.name}`, snippet:jobLabel(t.jobId)+(t.trade?` · ${t.trade}`:'')})));
+  pushGroup('Field Schedule', state.schedule.filter(t=>inScope(t.jobId) && matches(t.id,t.name,t.trade,t.gcActivityId))
+    .map(t=>({jobId:t.jobId, tab:'schedule', title:`${t.gcActivityId?t.gcActivityId+' — ':''}${t.name}`, snippet:jobLabel(t.jobId)+(t.trade?` · ${t.trade}`:'')+` · ${t.id}`})));
   pushGroup('Procurement', state.procurement.filter(p=>inScope(p.jobId) && matches(p.id,p.item,p.vendor,p.notes))
     .map(p=>({jobId:p.jobId, tab:'procurement', title:`${p.id} — ${p.item}`, snippet:jobLabel(p.jobId)+(p.vendor?` · ${p.vendor}`:'')})));
   pushGroup('Invoices', state.invoices.filter(inv=>inScope(inv.jobId) && matches(inv.id,inv.vendor,inv.invoiceNumber))
@@ -1849,7 +1867,7 @@ let readOnly = false;
 let stateVersion = 0;
 let pollTimer = null;
 
-function defaultState(){ return { jobs: [], rfis: [], cos: [], issues: [], logs: [], hours: [], contacts: [], scope: [], specs: [], submittals: [], invoices: [], projectedCosts: [], schedule: [], notes: [], requests: [], elevations: [], unitElevations: [], unitSkids: [], procurement: [], ganttLogs: [], scheduleUpdates: [], engineering: [], scheduleFieldNotes: [], team: [], aar: [], gcCommLog: [], greenSheets: [], materials: [], greenSheetQuotes: [], standards: [], safetyDocs: [], weldingProcedures: [], weldingLibrarySeeded: false, waterTests: [], elevationMarkups: [], equipmentLog: [], dailyReports: [], postItBoards: [], meetingMinutes: [], actionItems: [], notifications: [], timeOff: [], officeCalendarMemberIds: [] }; }
+function defaultState(){ return { jobs: [], rfis: [], cos: [], issues: [], logs: [], hours: [], contacts: [], scope: [], specs: [], submittals: [], invoices: [], projectedCosts: [], schedule: [], notes: [], requests: [], elevations: [], unitElevations: [], unitSkids: [], procurement: [], ganttLogs: [], scheduleUpdates: [], engineering: [], scheduleFieldNotes: [], team: [], aar: [], gcCommLog: [], greenSheets: [], materials: [], greenSheetQuotes: [], standards: [], safetyDocs: [], weldingProcedures: [], weldingLibrarySeeded: false, waterTests: [], elevationMarkups: [], equipmentLog: [], dailyReports: [], postItBoards: [], meetingMinutes: [], actionItems: [], gcSchedules: [], notifications: [], timeOff: [], officeCalendarMemberIds: [] }; }
 // Migration: legacy single-PM assignment (job.assignedPM, one team-member
 // id) -> multi-PM array (job.assignedPMs), mirroring how assignedForemen has
 // always worked. Called everywhere `state` gets reassigned from a fresh
@@ -2169,7 +2187,7 @@ function applyOp(op, s){
     case 'addJob': s.jobs.push(op.job); break;
     case 'deleteJob':
       s.jobs = s.jobs.filter(j=>j.id!==op.jobId);
-      ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','actionItems','elevations','unitElevations','unitSkids','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'].forEach(k=>{ s[k] = s[k].filter(x=>x.jobId!==op.jobId); });
+      ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','actionItems','gcSchedules','elevations','unitElevations','unitSkids','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'].forEach(k=>{ s[k] = s[k].filter(x=>x.jobId!==op.jobId); });
       // Per-person job-visibility overrides (see "Per-person job-visibility
       // overrides" near canManageTabOverrides) shouldn't accumulate stale
       // references to a job that no longer exists.
@@ -2479,6 +2497,22 @@ function applyOp(op, s){
       break;
     }
     case 'deleteActionItem': s.actionItems = (s.actionItems||[]).filter(x=>x.id!==op.id); break;
+    /* ---- GC schedule reference (parsed rows of the GC's workbook) ---- */
+    case 'addGcSchedule': {
+      s.gcSchedules = s.gcSchedules || [];
+      s.gcSchedules.push(op.entry);
+      // Keep the newest 3 imports per job. They're parsed rows, not the file,
+      // so they're cheap — but a PM re-importing a revised gantt every week
+      // shouldn't grow the saved state forever.
+      const mine = s.gcSchedules.filter(x=>x.jobId===op.entry.jobId)
+        .slice().sort((a,b)=>(b.importedAt||'').localeCompare(a.importedAt||''));
+      if(mine.length>3){
+        const drop = new Set(mine.slice(3).map(x=>x.id));
+        s.gcSchedules = s.gcSchedules.filter(x=>!drop.has(x.id));
+      }
+      break;
+    }
+    case 'deleteGcSchedule': s.gcSchedules = (s.gcSchedules||[]).filter(x=>x.id!==op.id); break;
     // Feature O: in-app notifications
     case 'addNotifications': s.notifications.push(...op.entries); break;
     case 'markNotificationRead': { const n = s.notifications.find(x=>x.id===op.id); if(n) n.read = true; break; }
@@ -2894,7 +2928,7 @@ const ARRAY_UNDO_LABELS = {
   aar:'AAR entry', hours:'hours entry', contacts:'contact', materials:'material',
   scope:'scope item', schedule:'task', scheduleUpdates:'schedule update',
   notes:'note', meetingMinutes:'meeting minutes entry', requests:'PM request',
-  actionItems:'action item',
+  actionItems:'action item', gcSchedules:'GC schedule import',
   engineering:'engineering item', elevations:'elevation', ganttLogs:'gantt log',
   unitElevations:'unit diagram elevation',
   scheduleFieldNotes:'field note', gcCommLog:'GC communication log entry',
@@ -2916,6 +2950,7 @@ const FLAT_DELETE_UNDO = {
   deleteNote: {arrayKey:'notes', idField:'id'},
   deleteMeetingMinutes: {arrayKey:'meetingMinutes', idField:'id'},
   deleteActionItem: {arrayKey:'actionItems', idField:'id'},
+  deleteGcSchedule: {arrayKey:'gcSchedules', idField:'id'},
   deleteRequest: {arrayKey:'requests', idField:'id'},
   deleteEngineering: {arrayKey:'engineering', idField:'id'},
   deleteElevation: {arrayKey:'elevations', idField:'id'},
@@ -2946,7 +2981,7 @@ const NESTED_DELETE_UNDO = {
   deleteElevationNote: {arrayKey:'elevations', parentField:'id', parentOpField:'elevId', subKey:'foremanNotes', subIdField:'noteId', label:'foreman note'},
   deletePostitNote: {arrayKey:'postItBoards', parentField:'ownerId', parentOpField:'ownerId', subKey:'notes', subIdField:'noteId', label:'sticky note'},
 };
-const JOB_DELETE_CASCADE_KEYS = ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','actionItems','elevations','unitElevations','unitSkids','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'];
+const JOB_DELETE_CASCADE_KEYS = ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','actionItems','gcSchedules','elevations','unitElevations','unitSkids','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'];
 function captureJobDeleteUndo(op){
   const job = state.jobs.find(j=>j.id===op.jobId);
   if(!job) return;
@@ -4916,27 +4951,27 @@ function renderTodoPanel(){
     <div class="issue-meta" style="margin:0 0 10px;">Every open action item across your jobs. Tick one off right here — you don't have to open the job.</div>
     ${body || `<div class="issue-meta" style="padding:8px 0;">Nothing open. Anything added here or on a job's Meeting Minutes tab shows up in this list.</div>`}
     ${readOnly ? '' : `<div class="td-add">
-      <input type="text" id="td-text" placeholder="Add a to-do&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault();submitHomeTodo();}">
+      <input type="text" id="hometodo-text" placeholder="Add a to-do&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault();submitHomeTodo();}">
       <div class="td-addrow">
-        <select id="td-job" aria-label="Job this to-do belongs to">${jobOpts}</select>
-        <select id="td-subject" aria-label="Subject">${actionItemSubjectOptionsHTML('')}</select>
+        <select id="hometodo-job" aria-label="Job this to-do belongs to">${jobOpts}</select>
+        <select id="hometodo-subject" aria-label="Subject">${actionItemSubjectOptionsHTML('')}</select>
       </div>
       <div class="td-addrow">
-        <input type="date" id="td-due" aria-label="Due date">
+        <input type="date" id="hometodo-due" aria-label="Due date">
         <button class="btn sm safety" onclick="submitHomeTodo()">${icon('plus')} Add</button>
       </div>
     </div>`}
   </div>`;
 }
 function submitHomeTodo(){
-  const textEl = document.getElementById('td-text');
+  const textEl = document.getElementById('hometodo-text');
   const text = textEl ? textEl.value.trim() : '';
   if(!text) return;
-  const jobEl = document.getElementById('td-job');
-  const dueEl = document.getElementById('td-due');
+  const jobEl = document.getElementById('hometodo-job');
+  const dueEl = document.getElementById('hometodo-due');
   const jobId = jobEl ? jobEl.value : '';
   if(!jobId) return;
-  const subjEl = document.getElementById('td-subject');
+  const subjEl = document.getElementById('hometodo-subject');
   const me = getEffectiveTeamMember();
   commit({type:'addActionItem', entry: makeActionItem(jobId, text, (me && me.id) || '', dueEl?dueEl.value:'', '', subjEl?subjEl.value:'')});
   if(textEl) textEl.value = '';
@@ -6876,6 +6911,7 @@ function taskCardHTML(t, job){
         <div style="font-weight:700; font-size:13px; flex:1; min-width:0;">${esc(t.name)}</div>
         ${priorityChipHTML(t.priority)}
       </div>
+      ${t.gcActivityId?`<div style="margin-top:4px;"><span class="task-actid">${esc(t.gcActivityId)}</span></div>`:''}
       <div class="issue-meta" style="margin-top:3px;">${job&&job.id?job.id+' · ':''}${t.trade?esc(t.trade)+' · ':''}${t.manpower||0} crew · ${t.duration||0}d</div>
       <div class="issue-meta">${t.currentStart?`Start ${t.currentStart}`:'No start date'}${t.dueDate?` · Due ${t.dueDate}`:''}</div>
       <div class="issue-meta" style="margin-top:4px; display:flex; justify-content:space-between; align-items:center;">
@@ -7086,6 +7122,165 @@ function renderTaskKanban(job, tasks){
   }).join('');
   return `<div class="kanban-board">${cols}</div>`;
 }
+/* ===================== GC SCHEDULE REFERENCE =====================
+   Greg: "where I can upload the General Contractors Schedule. Is there a way I
+   can type in the Activity ID to isolate that one and put it on the schedule."
+   A GC gantt has hundreds of activities; the glazing scope is a dozen or two.
+   Before this, "Import from Excel" turned EVERY row into a Nucleus task and
+   kept nothing, so pulling out your own scope meant importing 800 tasks and
+   deleting 780.
+   Now the parsed workbook is kept on the job as a reference (newest 3 imports
+   per job; they are plain rows, not the file, so they cost very little), and
+   the panel below lets you find an activity by its Activity ID — or by part of
+   its name, or by pasting a whole list of IDs at once — and add just those as
+   real tasks. Each task created this way carries the GC's own Activity ID in
+   `gcActivityId`, which is the piece that was missing before: it is what will
+   let a revised GC schedule be matched against your tasks automatically
+   instead of being re-keyed by hand in "Schedule updates". ---- */
+function gcSchedulesFor(jobId){
+  return (state.gcSchedules||[]).filter(g=>g.jobId===jobId)
+    .slice().sort((a,b)=>(b.importedAt||'').localeCompare(a.importedAt||''));
+}
+function latestGcSchedule(jobId){ return gcSchedulesFor(jobId)[0] || null; }
+function gcActivityKey(a, i){ return String(a.actId||'').trim() ? 'id:'+String(a.actId).trim().toLowerCase() : 'row:'+i; }
+function taskHasGcActivity(tasks, actId){
+  const want = String(actId||'').trim().toLowerCase();
+  if(!want) return false;
+  return (tasks||[]).some(t=> String(t.gcActivityId||'').trim().toLowerCase()===want);
+}
+// One box, three behaviours, because that is how a real Activity ID arrives:
+// typed one at a time, pasted as a list out of the GC's email, or half
+// remembered ("that level 3 glazing one").
+function gcSearchMatches(sched, query){
+  const acts = (sched && sched.activities) || [];
+  const q = String(query||'').trim();
+  if(!q) return [];
+  const tokens = q.split(/[,;\n\r\t]+/).map(t=>t.trim()).filter(Boolean);
+  if(tokens.length>1){
+    const want = new Set(tokens.map(t=>t.toLowerCase()));
+    return acts.map((a,i)=>({a,i})).filter(({a})=> want.has(String(a.actId||'').trim().toLowerCase()));
+  }
+  const t = tokens[0].toLowerCase();
+  // Trade is in the single-token match on purpose: "glazing" is how a PM finds
+  // their own scope in a gantt where the activity names say "Curtainwall".
+  return acts.map((a,i)=>({a,i})).filter(({a})=>
+    String(a.actId||'').toLowerCase().includes(t)
+    || String(a.name||'').toLowerCase().includes(t)
+    || String(a.trade||'').toLowerCase().includes(t));
+}
+function gcPickedList(){ return Array.isArray(ui.gcPicked) ? ui.gcPicked : []; }
+function runGcSearch(jobId){
+  const el = document.getElementById('gc-find');
+  ui.gcQuery = el ? el.value : '';
+  ui.gcQueryJob = jobId;
+  ui.gcPicked = [];
+  render();
+}
+function clearGcSearch(){ ui.gcQuery=''; ui.gcPicked=[]; render(); }
+function toggleGcPick(key){
+  const list = gcPickedList().slice();
+  const at = list.indexOf(key);
+  if(at>=0) list.splice(at,1); else list.push(key);
+  ui.gcPicked = list;
+  render();
+}
+function gcPickAllShown(jobId){
+  const sched = latestGcSchedule(jobId);
+  const tasks = state.schedule.filter(t=>t.jobId===jobId);
+  const hits = gcSearchMatches(sched, ui.gcQuery).filter(({a})=>!taskHasGcActivity(tasks, a.actId));
+  ui.gcPicked = hits.slice(0,40).map(({a,i})=>gcActivityKey(a,i));
+  render();
+}
+function addGcActivitiesToSchedule(jobId){
+  const sched = latestGcSchedule(jobId);
+  if(!sched) return;
+  const picked = gcPickedList();
+  if(!picked.length) return;
+  const chosen = (sched.activities||[])
+    .map((a,i)=>({a,i}))
+    .filter(({a,i})=> picked.includes(gcActivityKey(a,i)));
+  if(!chosen.length) return;
+  const startCount = state.schedule.filter(x=>x.jobId===jobId).length;
+  const entries = chosen.map(({a},n)=>({
+    id: `${jobId}-TSK-${String(startCount+n+1).padStart(3,'0')}`, jobId,
+    gcActivityId: String(a.actId||'').trim(),
+    name: a.name || (a.actId ? String(a.actId) : 'Untitled activity'),
+    trade: a.trade || '', manpower: a.manpower || 0,
+    duration: (a.duration && a.duration>=1) ? a.duration : 1,
+    originalStart: a.start || todayStr(), currentStart: a.start || todayStr(), actualStart: '',
+    status: 'Not Started', delayReason: '', linkedIssueId: '',
+    priority: a.priority || 'Medium', dueDate: a.due || '',
+    notes: [], attachments: []
+  }));
+  commit({type:'addTasks', entries});
+  ui.gcPicked = [];
+  render();
+}
+function removeGcSchedule(id){
+  commit({type:'deleteGcSchedule', id});
+  ui.gcPicked = [];
+  render();
+}
+function renderGcScheduleRef(job, tasks){
+  const sched = latestGcSchedule(job.id);
+  const head = `<div class="panel-head" style="margin-top:0;"><h3>GC schedule — pull activities by ID</h3></div>`;
+  if(!sched){
+    return `${head}
+      <div class="issue-meta" style="margin-bottom:8px;">No GC schedule stored on this job yet. Use <b>Import from Excel</b> above, and on the preview screen choose <b>Save to job</b> — the activities are kept here so you can pull the ones that are yours by Activity ID instead of importing the whole gantt.</div>`;
+  }
+  const count = (sched.activities||[]).length;
+  const withIds = (sched.activities||[]).filter(a=>String(a.actId||'').trim()).length;
+  const query = (ui.gcQueryJob===job.id) ? (ui.gcQuery||'') : '';
+  const picked = gcPickedList();
+  const hits = gcSearchMatches(sched, query);
+  const shown = hits.slice(0,40);
+  const addable = shown.filter(({a})=>!taskHasGcActivity(tasks, a.actId)).length;
+
+  const rows = shown.map(({a,i})=>{
+    const key = gcActivityKey(a,i);
+    const already = taskHasGcActivity(tasks, a.actId);
+    const on = picked.includes(key);
+    return `<div class="gc-act${already?' used':''}${on?' picked':''}">
+      <label>
+        <input type="checkbox" ${on?'checked':''} ${already||readOnly?'disabled':''} onchange="toggleGcPick('${esc(key)}')" aria-label="Select ${esc(a.actId||a.name)}">
+        <span class="gc-actid">${a.actId?esc(a.actId):'<span class="issue-meta">no ID</span>'}</span>
+        <span class="gc-actname">${esc(a.name||'')}</span>
+      </label>
+      <span class="gc-actmeta">${a.start?esc(a.start):'no start'}${a.duration?' · '+a.duration+'d':''}${a.trade?' · '+esc(a.trade):''}${already?' · <b>on schedule</b>':''}</span>
+    </div>`;
+  }).join('');
+
+  let body;
+  if(!query){
+    body = `<div class="issue-meta" style="padding:6px 0;">Type an Activity ID (or part of an activity name) above and press Find. You can paste several IDs at once, separated by commas or one per line.</div>`;
+  } else if(!hits.length){
+    body = `<div class="issue-meta" style="padding:6px 0;">Nothing in this schedule matches “${esc(query.slice(0,60))}”.</div>`;
+  } else {
+    body = `<div class="gc-actlist">${rows}</div>
+      ${hits.length>40?`<div class="issue-meta">Showing the first 40 of ${hits.length} matches — narrow the search to see the rest.</div>`:''}
+      ${readOnly?'':`<div class="gc-actbar">
+        <button class="btn sm secondary" ${addable===0?'disabled':''} onclick="gcPickAllShown('${job.id}')">Select all ${addable} not yet on the schedule</button>
+        <span class="spacer"></span>
+        <button class="btn sm safety" ${picked.length===0?'disabled':''} onclick="addGcActivitiesToSchedule('${job.id}')">${icon('plus')} Add ${picked.length||''} to schedule</button>
+      </div>`}`;
+  }
+
+  return `${head}
+    <div class="gc-schedhead">
+      <div>
+        <div style="font-weight:700; font-size:13.5px;">${esc(sched.fileName||'GC schedule')}</div>
+        <div class="issue-meta">Imported ${esc(sched.importedAt||'')}${sched.importedBy?' by '+esc(sched.importedBy):''} · ${count} activit${count===1?'y':'ies'}${withIds<count?` · ${withIds} with an Activity ID`:''}</div>
+      </div>
+      ${readOnly?'':`<button class="btn sm secondary" onclick="removeGcSchedule('${sched.id}')">${icon('trash')} Remove</button>`}
+    </div>
+    ${readOnly?'':`<div class="gc-findbar">
+      <input type="text" id="gc-find" value="${esc(query)}" placeholder="Activity ID — A-1450, or paste a list, or part of a name or trade"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();runGcSearch('${job.id}');}">
+      <button class="btn sm" onclick="runGcSearch('${job.id}')">${icon('search')} Find</button>
+      ${query?`<button class="btn sm secondary" onclick="clearGcSearch()">Clear</button>`:''}
+    </div>`}
+    ${body}`;
+}
 function renderSchedule(job, tasks, issues, ganttLogs, procurement, scheduleUpdates, scheduleFieldNotes, gcCommLog){
   ganttLogs = ganttLogs || [];
   procurement = procurement || [];
@@ -7123,6 +7318,7 @@ function renderSchedule(job, tasks, issues, ganttLogs, procurement, scheduleUpda
     <div class="issue-meta" style="margin-bottom:6px;">Drag a task on the calendar to reschedule it — its manpower and duration move with it. Tap a teal GC chip to jump to the coordination log below. Material procurement now lives entirely on its own Procurement tab.</div>
     <div class="cal-grid">${dayHeaders}${cellsHtml}</div>
     ${renderCalendarLegend([job], {showRequest:false, showGc:true, showProcurement:false})}
+    <div style="margin-top:26px; padding-top:20px; border-top:1.5px solid var(--line-strong);">${renderGcScheduleRef(job, tasks)}</div>
     <div class="section-title" style="margin-top:22px;">Task list</div>
     <div class="issue-meta" style="margin-bottom:8px;">Drag a card between columns to update its status.</div>
     ${tasks.length===0 ? emptyBlock('calendarEvent','No schedule tasks yet — add tasks from the GC gantt schedule to start tracking manpower and dates.') : renderTaskKanban(job, tasks)}
@@ -7287,6 +7483,7 @@ function taskDetailHTML(t){
     </div>`).join('');
   return `<div class="modal" style="max-width:640px;">
     <h3>${esc(t.name)}</h3><p class="sub">${esc(t.trade||'—')} · ${t.manpower||0} crew · ${t.duration||0} day${t.duration===1?'':'s'}</p>
+    <div class="field"><label>GC Activity ID</label><input type="text" id="td-actid" value="${esc(t.gcActivityId||'')}" placeholder="e.g. A-1450" ${disabledAttr()} onchange="updateTaskField('${t.id}','gcActivityId',this.value.trim())"></div>
     <div class="field-row">
       <div class="field"><label>Manpower</label><input type="number" id="td-manpower" min="0" value="${t.manpower||0}" ${disabledAttr()} onchange="updateTaskField('${t.id}','manpower',Number(this.value)||0)"></div>
       <div class="field"><label>Duration (days)</label><input type="number" id="td-duration" min="1" value="${t.duration||1}" ${disabledAttr()} onchange="updateTaskDuration('${t.id}', this.value)"></div>
@@ -7765,6 +7962,7 @@ function toggleActionItem(id){
 function setActionItemOwner(id, ownerId){ commit({type:'updateActionItem', id, patch:{ownerId: ownerId||''}}); }
 function setActionItemDue(id, dueDate){ commit({type:'updateActionItem', id, patch:{dueDate: dueDate||''}}); }
 function deleteActionItem(id){ commit({type:'deleteActionItem', id}); }
+function toggleActionItemDoneLog(jobId){ ui.aiShowAllDone = (ui.aiShowAllDone===jobId) ? null : jobId; render(); }
 
 function actionItemRowHTML(a){
   const done = a.status===ACTION_ITEM_DONE;
@@ -7793,8 +7991,13 @@ function renderActionItemsSection(job){
   const all = actionItemsFor(job.id);
   const open = all.filter(a=>a.status!==ACTION_ITEM_DONE)
     .sort((a,b)=>(a.dueDate||'9999-99-99').localeCompare(b.dueDate||'9999-99-99'));
-  const done = all.filter(a=>a.status===ACTION_ITEM_DONE)
-    .sort((a,b)=>(b.doneDate||'').localeCompare(a.doneDate||'')).slice(0,10);
+  const doneAll = all.filter(a=>a.status===ACTION_ITEM_DONE)
+    .sort((a,b)=>(b.doneDate||'').localeCompare(a.doneDate||''));
+  // Nothing is ever dropped — the full history stays one click away. Only the
+  // default view is trimmed so a job with 200 closed items doesn't bury the
+  // open ones.
+  const showAllDone = ui.aiShowAllDone===job.id;
+  const done = showAllDone ? doneAll : doneAll.slice(0,10);
   const overdue = open.filter(actionItemIsOverdue).length;
   return `<div class="section" style="margin-bottom:24px;">
     <div class="panel-head"><h3>Action items</h3>
@@ -7809,7 +8012,7 @@ function renderActionItemsSection(job){
       <button class="btn safety" onclick="submitActionItem('${job.id}')">${icon('plus')} Add</button>
     </div>`}
     ${open.length ? open.map(actionItemRowHTML).join('') : `<div class="issue-meta" style="padding:4px 0;">Nothing open right now.</div>`}
-    ${done.length ? `<div class="section-title" style="margin-top:16px;">Recently completed</div>${done.map(actionItemRowHTML).join('')}` : ''}
+    ${doneAll.length ? `<div class="section-title" style="margin-top:16px;">Completed (${doneAll.length})</div>${done.map(actionItemRowHTML).join('')}${doneAll.length>10?`<div style="margin-top:8px;"><button class="btn sm secondary" onclick="toggleActionItemDoneLog('${job.id}')">${showAllDone?'Show only the last 10':`Show all ${doneAll.length} completed`}</button></div>`:''}` : ''}
   </div>`;
 }
 // Idempotent, exactly like the Schedule-task version this replaced (and like
@@ -10175,9 +10378,9 @@ function modalHTML(type){
     const preview = computeScheduleImportPreview();
     const validCount = preview.filter(r=>r.valid).length;
     const previewRowsHtml = preview.slice(0,8).map(r=>`<tr>
-      <td data-label="Task name">${r.name ? esc(r.name) : '<span class="issue-meta">(blank — skipped)</span>'}</td>
+      <td data-label="Activity ID">${r.activityId?esc(r.activityId):'—'}</td>
+      <td data-label="Task name">${r.name ? esc(r.name) : (r.activityId ? '<span class="issue-meta">(uses the Activity ID)</span>' : '<span class="issue-meta">(blank — skipped)</span>')}</td>
       <td data-label="Trade">${esc(r.trade)||'—'}</td>
-      <td data-label="Manpower">${r.manpower!=null?r.manpower:'—'}</td>
       <td data-label="Duration">${r.duration!=null?r.duration+'d':'defaults to 1d'}</td>
       <td data-label="Start">${r.start||'defaults to today'}</td>
       <td data-label="Due">${r.due||'—'}</td>
@@ -10186,19 +10389,23 @@ function modalHTML(type){
       <h3>Import schedule from Excel</h3>
       <p class="sub">${ui.jobId} — "${esc(scheduleImportState.fileName)}", ${scheduleImportState.rows.length} row${scheduleImportState.rows.length===1?'':'s'} found. Match each column, then review below before importing.</p>
       <div class="field-row three">
+        ${scheduleImportFieldSelect('activityId','Activity ID',false)}
         ${scheduleImportFieldSelect('name','Task name',true)}
         ${scheduleImportFieldSelect('trade','Trade / crew',false)}
-        ${scheduleImportFieldSelect('manpower','Manpower',false)}
       </div>
       <div class="field-row three">
+        ${scheduleImportFieldSelect('manpower','Manpower',false)}
         ${scheduleImportFieldSelect('duration','Duration (days)',false)}
         ${scheduleImportFieldSelect('start','Start date',false)}
-        ${scheduleImportFieldSelect('due','Due date',false)}
       </div>
-      ${scheduleImportFieldSelect('priority','Priority (optional)',false)}
-      <div class="issue-meta" style="margin:8px 0;">Rows with no Task name are skipped. A missing duration defaults to 1 day; a missing start date defaults to today.</div>
+      <div class="field-row three">
+        ${scheduleImportFieldSelect('due','Due date',false)}
+        ${scheduleImportFieldSelect('priority','Priority (optional)',false)}
+        <div class="field"></div>
+      </div>
+      <div class="issue-meta" style="margin:8px 0;">A row with neither a Task name nor an Activity ID is skipped. A missing duration defaults to 1 day; a missing start date defaults to today.<br><b>Save to job</b> keeps these activities on the job so you can pull out just the ones that are yours by Activity ID — it creates no tasks. <b>Import all</b> turns every row into a task, and stores the reference too.</div>
       <div style="overflow-x:auto;"><table class="li-table">
-        <thead><tr><th>Task name</th><th>Trade</th><th>Manpower</th><th>Duration</th><th>Start</th><th>Due</th></tr></thead>
+        <thead><tr><th>Activity ID</th><th>Task name</th><th>Trade</th><th>Duration</th><th>Start</th><th>Due</th></tr></thead>
         <tbody>${previewRowsHtml || `<tr><td colspan="6" class="issue-meta">No data rows found in this file.</td></tr>`}</tbody>
       </table></div>
       ${preview.length>8?`<div class="issue-meta">Showing first 8 of ${preview.length} rows.</div>`:''}
@@ -10206,7 +10413,8 @@ function modalHTML(type){
       <div class="modal-actions">
         <button class="btn secondary" onclick="closeModal()">Cancel</button>
         <button class="btn secondary" onclick="scheduleImportBack()">${icon('arrowLeft')} Choose a different file</button>
-        <button class="btn safety" ${validCount===0?'disabled':''} onclick="submitScheduleImport()">Import ${validCount} task${validCount===1?'':'s'}</button>
+        <button class="btn" ${validCount===0?'disabled':''} onclick="submitScheduleReference()">Save to job — pick by Activity ID</button>
+        <button class="btn safety" ${validCount===0?'disabled':''} onclick="submitScheduleImport()">Import all ${validCount} as tasks</button>
       </div>
     </div>`;
   }
@@ -11083,10 +11291,14 @@ function guessScheduleColumnMap(headers){
     return '';
   };
   return {
+    // Activity ID is picked FIRST on purpose: on a real GC export the columns
+    // read "Activity ID" then "Activity Name", and the name pattern below also
+    // matches the word "activity" — picking name first would eat the ID column.
+    activityId: pick(/activity\s*id|activity\s*#|act(ivity)?\s*code|^\s*id\s*$|task\s*id|\bwbs\b/i),
     name: pick(/task|activity|description|scope|item/i),
     trade: pick(/trade|crew\b|sub(contractor)?\b/i),
     manpower: pick(/manpower|crew size|headcount|#?\s*of\s*(men|workers|crew)|workers/i),
-    duration: pick(/duration|days?\b/i),
+    duration: pick(/duration|orig(inal)?\s*dur|rem(aining)?\s*dur|\bdur\.?\b|days?\b/i),
     start: pick(/start|begin/i),
     due: pick(/due|finish|end|complete/i),
     priority: pick(/priority/i)
@@ -11170,6 +11382,7 @@ function computeScheduleImportPreview(){
   const {rows, mapping} = scheduleImportState;
   const get = (row, field)=> mapping[field]!==''? row[mapping[field]] : '';
   return rows.map(row=>{
+    const activityId = String(get(row,'activityId')||'').trim();
     const name = String(get(row,'name')||'').trim();
     const trade = String(get(row,'trade')||'').trim();
     const manpower = parseIntSafeLoose(get(row,'manpower'));
@@ -11178,17 +11391,46 @@ function computeScheduleImportPreview(){
     const due = parseExcelDateCell(get(row,'due'));
     const priorityRaw = get(row,'priority');
     const priority = priorityRaw!==''? normalizeImportedPriority(priorityRaw) : 'Medium';
-    return { name, trade, manpower, duration, start, due, priority, valid: !!name };
+    return { activityId, name, trade, manpower, duration, start, due, priority, valid: !!(name || activityId) };
   });
+}
+// The parsed workbook becomes a reference on the job whichever button is used,
+// so the Activity ID picker on the Field Schedule tab always has something to
+// search even if the PM chose to bulk-import as well.
+function buildGcScheduleEntry(validRows){
+  return {
+    id: `GCS-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`,
+    jobId: ui.jobId,
+    fileName: (scheduleImportState && scheduleImportState.fileName) || 'GC schedule',
+    importedAt: todayStr(),
+    importedBy: currentUserName || '',
+    activities: validRows.map(r=>({
+      actId: r.activityId||'', name: r.name || r.activityId || 'Untitled activity', trade: r.trade||'',
+      manpower: r.manpower||0, duration: r.duration||null,
+      start: r.start||'', due: r.due||'', priority: r.priority||'Medium'
+    }))
+  };
+}
+function submitScheduleReference(){
+  if(!scheduleImportState) return;
+  const valid = computeScheduleImportPreview().filter(r=>r.valid);
+  if(!valid.length) return showErr('No rows matched — make sure "Task name" or "Activity ID" is mapped to a column that has data in it.');
+  commit({type:'addGcSchedule', entry: buildGcScheduleEntry(valid)});
+  scheduleImportState = null;
+  ui.gcQuery = ''; ui.gcPicked = []; ui.gcQueryJob = ui.jobId;
+  closeModal();
+  render();
 }
 function submitScheduleImport(){
   if(!scheduleImportState) return;
   const valid = computeScheduleImportPreview().filter(r=>r.valid);
-  if(!valid.length) return showErr('No rows matched — make sure "Task name" is mapped to a column that has data in it.');
+  if(!valid.length) return showErr('No rows matched — make sure "Task name" or "Activity ID" is mapped to a column that has data in it.');
+  commit({type:'addGcSchedule', entry: buildGcScheduleEntry(valid)});
   const startCount = state.schedule.filter(x=>x.jobId===ui.jobId).length;
   const entries = valid.map((r,i)=>({
     id: `${ui.jobId}-TSK-${String(startCount+i+1).padStart(3,'0')}`, jobId: ui.jobId,
-    name: r.name, trade: r.trade||'', manpower: r.manpower||0,
+    gcActivityId: r.activityId||'',
+    name: r.name || r.activityId || 'Untitled activity', trade: r.trade||'', manpower: r.manpower||0,
     duration: (r.duration && r.duration>=1) ? r.duration : 1,
     originalStart: r.start||todayStr(), currentStart: r.start||todayStr(), actualStart: '',
     status: 'Not Started', delayReason: '', linkedIssueId: '',
