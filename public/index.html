@@ -794,6 +794,19 @@
   .ud-skidgrid{grid-template-columns:1fr}
   .ud-glass{margin-left:0}
 }
+/* ---- Action items ---- */
+.ai-row{display:flex;align-items:flex-start;gap:10px;padding:9px 11px;border:1px solid var(--line);border-left:3px solid var(--steel);border-radius:8px;background:var(--card,#fff);margin-bottom:8px}
+.ai-row.over{border-left-color:var(--safety)}
+.ai-row.done{border-left-color:var(--good);background:var(--good-dim)}
+.ai-row>input[type=checkbox]{width:18px;height:18px;margin:3px 0 0;flex:none;cursor:pointer}
+.ai-main{flex:1;min-width:0}
+.ai-text{font-size:13.5px;white-space:pre-wrap;word-break:break-word}
+.ai-row.done .ai-text{text-decoration:line-through;color:var(--text-muted)}
+.ai-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
+.ai-meta select,.ai-meta input[type=date]{font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--paper);font-family:inherit}
+.ai-add{display:grid;grid-template-columns:1fr 200px 160px auto;gap:10px;align-items:end;margin:0 0 14px}
+.ai-add .btn{height:38px}
+@media (max-width:760px){ .ai-add{grid-template-columns:1fr} .ai-add .btn{width:100%} }
 </style>
 
 <div class="topbar">
@@ -1516,6 +1529,9 @@ function searchApp(query){
     .map(r=>({jobId:r.jobId, tab:'requests', title:`${r.id} — ${r.title}`, snippet:jobLabel(r.jobId)})));
   pushGroup('Notes', state.notes.filter(n=>inScope(n.jobId) && matches(n.text,n.author,n.category))
     .map(n=>({jobId:n.jobId, tab:'notes', title:n.text, snippet:jobLabel(n.jobId)+(n.author?` · ${n.author}`:'')+(n.category?` · ${n.category}`:'')})));
+  pushGroup('Action items', (state.actionItems||[]).filter(a=>inScope(a.jobId) && matches(a.id,a.text,actionItemOwnerName(a)))
+    .map(a=>({jobId:a.jobId, tab:'meetingminutes', title:a.text,
+      snippet:jobLabel(a.jobId)+(actionItemOwnerName(a)?` · ${actionItemOwnerName(a)}`:'')+(a.dueDate?` · due ${a.dueDate}`:'')+(a.status==='Done'?' · done':'')})));
   pushGroup('Logs', state.logs.filter(l=>inScope(l.jobId) && matches(l.note,l.author))
     .map(l=>({jobId:l.jobId, tab:'alllogs', title:l.note, snippet:jobLabel(l.jobId)+(l.author?` · ${l.author}`:'')})));
   pushGroup('Elevations', state.elevations.filter(el=>inScope(el.jobId) && (matches(el.id,el.name,el.drawingRef,el.notes) || (el.foremanNotes||[]).some(n=>matches(n.text))))
@@ -1798,7 +1814,7 @@ let readOnly = false;
 let stateVersion = 0;
 let pollTimer = null;
 
-function defaultState(){ return { jobs: [], rfis: [], cos: [], issues: [], logs: [], hours: [], contacts: [], scope: [], specs: [], submittals: [], invoices: [], projectedCosts: [], schedule: [], notes: [], requests: [], elevations: [], unitElevations: [], unitSkids: [], procurement: [], ganttLogs: [], scheduleUpdates: [], engineering: [], scheduleFieldNotes: [], team: [], aar: [], gcCommLog: [], greenSheets: [], materials: [], greenSheetQuotes: [], standards: [], safetyDocs: [], weldingProcedures: [], weldingLibrarySeeded: false, waterTests: [], elevationMarkups: [], equipmentLog: [], dailyReports: [], postItBoards: [], meetingMinutes: [], notifications: [], timeOff: [], officeCalendarMemberIds: [] }; }
+function defaultState(){ return { jobs: [], rfis: [], cos: [], issues: [], logs: [], hours: [], contacts: [], scope: [], specs: [], submittals: [], invoices: [], projectedCosts: [], schedule: [], notes: [], requests: [], elevations: [], unitElevations: [], unitSkids: [], procurement: [], ganttLogs: [], scheduleUpdates: [], engineering: [], scheduleFieldNotes: [], team: [], aar: [], gcCommLog: [], greenSheets: [], materials: [], greenSheetQuotes: [], standards: [], safetyDocs: [], weldingProcedures: [], weldingLibrarySeeded: false, waterTests: [], elevationMarkups: [], equipmentLog: [], dailyReports: [], postItBoards: [], meetingMinutes: [], actionItems: [], notifications: [], timeOff: [], officeCalendarMemberIds: [] }; }
 // Migration: legacy single-PM assignment (job.assignedPM, one team-member
 // id) -> multi-PM array (job.assignedPMs), mirroring how assignedForemen has
 // always worked. Called everywhere `state` gets reassigned from a fresh
@@ -2118,7 +2134,7 @@ function applyOp(op, s){
     case 'addJob': s.jobs.push(op.job); break;
     case 'deleteJob':
       s.jobs = s.jobs.filter(j=>j.id!==op.jobId);
-      ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','elevations','unitElevations','unitSkids','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'].forEach(k=>{ s[k] = s[k].filter(x=>x.jobId!==op.jobId); });
+      ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','actionItems','elevations','unitElevations','unitSkids','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'].forEach(k=>{ s[k] = s[k].filter(x=>x.jobId!==op.jobId); });
       // Per-person job-visibility overrides (see "Per-person job-visibility
       // overrides" near canManageTabOverrides) shouldn't accumulate stale
       // references to a job that no longer exists.
@@ -2402,9 +2418,22 @@ function applyOp(op, s){
     case 'convertMeetingMinutesItem': {
       const m = s.meetingMinutes.find(x=>x.id===op.mtgId);
       const item = m && (m.items||[]).find(x=>x.id===op.itemId);
-      if(item){ item.converted = true; item.convertedToScheduleTaskId = op.taskId; }
+      if(item){ item.converted = true; item.convertedToScheduleTaskId = op.taskId; item.actionItemId = op.taskId; }
       break;
     }
+    /* ---- Action items (meeting follow-ups that surface on the home screen) ---- */
+    case 'addActionItem': (s.actionItems = s.actionItems||[]).push(op.entry); break;
+    case 'updateActionItem': {
+      const a = (s.actionItems||[]).find(x=>x.id===op.id);
+      if(a) Object.assign(a, op.patch);
+      break;
+    }
+    case 'setActionItemStatus': {
+      const a = (s.actionItems||[]).find(x=>x.id===op.id);
+      if(a){ a.status = op.status; a.doneDate = op.doneDate||''; }
+      break;
+    }
+    case 'deleteActionItem': s.actionItems = (s.actionItems||[]).filter(x=>x.id!==op.id); break;
     // Feature O: in-app notifications
     case 'addNotifications': s.notifications.push(...op.entries); break;
     case 'markNotificationRead': { const n = s.notifications.find(x=>x.id===op.id); if(n) n.read = true; break; }
@@ -2820,6 +2849,7 @@ const ARRAY_UNDO_LABELS = {
   aar:'AAR entry', hours:'hours entry', contacts:'contact', materials:'material',
   scope:'scope item', schedule:'task', scheduleUpdates:'schedule update',
   notes:'note', meetingMinutes:'meeting minutes entry', requests:'PM request',
+  actionItems:'action item',
   engineering:'engineering item', elevations:'elevation', ganttLogs:'gantt log',
   unitElevations:'unit diagram elevation',
   scheduleFieldNotes:'field note', gcCommLog:'GC communication log entry',
@@ -2840,6 +2870,7 @@ const FLAT_DELETE_UNDO = {
   deleteScheduleUpdate: {arrayKey:'scheduleUpdates', idField:'id'},
   deleteNote: {arrayKey:'notes', idField:'id'},
   deleteMeetingMinutes: {arrayKey:'meetingMinutes', idField:'id'},
+  deleteActionItem: {arrayKey:'actionItems', idField:'id'},
   deleteRequest: {arrayKey:'requests', idField:'id'},
   deleteEngineering: {arrayKey:'engineering', idField:'id'},
   deleteElevation: {arrayKey:'elevations', idField:'id'},
@@ -2870,7 +2901,7 @@ const NESTED_DELETE_UNDO = {
   deleteElevationNote: {arrayKey:'elevations', parentField:'id', parentOpField:'elevId', subKey:'foremanNotes', subIdField:'noteId', label:'foreman note'},
   deletePostitNote: {arrayKey:'postItBoards', parentField:'ownerId', parentOpField:'ownerId', subKey:'notes', subIdField:'noteId', label:'sticky note'},
 };
-const JOB_DELETE_CASCADE_KEYS = ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','elevations','unitElevations','unitSkids','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'];
+const JOB_DELETE_CASCADE_KEYS = ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','actionItems','elevations','unitElevations','unitSkids','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'];
 function captureJobDeleteUndo(op){
   const job = state.jobs.find(j=>j.id===op.jobId);
   if(!job) return;
@@ -4530,7 +4561,20 @@ function collectLookAhead(){
     if(e.status==='Done') return;
     items.push({type:'Drafting', jobId:e.jobId, label:e.title, date:e.dateNeeded, status:e.status, tab:'engineering'});
   });
-  const visible = items.filter(it=>isJobVisible(it.jobId));
+  (state.actionItems||[]).forEach(a=>{
+    if(a.status==='Done') return;
+    items.push({type:'Action item', jobId:a.jobId, label:a.text, date:a.dueDate, status:a.status,
+                tab:'meetingminutes', ownerId:a.ownerId||'', who:actionItemOwnerName(a)});
+  });
+  // Action items are the one source here that is owned by a person, so they
+  // carry one extra visibility rule on top of isJobVisible: a Foreman sees
+  // only the items assigned to them (an unassigned item is nobody's, so it
+  // stays off their list too). Every other role keeps the plain job-visibility
+  // rule, unchanged — see the ACTION ITEMS block for the full reasoning.
+  const meLA = getEffectiveTeamMember();
+  const foremanLA = !!(meLA && meLA.role==='Foreman');
+  const visible = items.filter(it=>isJobVisible(it.jobId)
+    && !(foremanLA && it.type==='Action item' && it.ownerId!==meLA.id));
   visible.sort((a,b)=>(a.date||'9999-99-99').localeCompare(b.date||'9999-99-99'));
   return visible;
 }
@@ -4564,7 +4608,7 @@ function renderLookAhead(){
     return `<div class="log-entry" style="cursor:pointer;" onclick="openJob('${it.jobId}','${it.tab}')">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
         <div style="flex:1; min-width:0;">
-          <div class="issue-meta">${job?job.id:it.jobId}${job?' — '+esc(job.name):''} · ${it.type}</div>
+          <div class="issue-meta">${job?job.id:it.jobId}${job?' — '+esc(job.name):''} · ${it.type}${it.who?' · '+esc(it.who):''}</div>
           <div style="font-weight:700; font-size:13.5px;">${esc(it.label)}</div>
         </div>
         <div style="text-align:right; flex-shrink:0;">
@@ -4770,13 +4814,13 @@ function renderBriefing(){
     const job = getJob(it.jobId);
     const days = daysBetweenStr(today, it.date);
     const when = days===0?'today':(days===1?'tomorrow':`in ${days}d`);
-    return `<div class="brief-line">${icon('clock')}<span><b>${job?job.id:it.jobId}</b> — ${esc(it.label)} <span class="issue-meta">(${it.type}, due ${when})</span></span></div>`;
+    return `<div class="brief-line">${icon('clock')}<span><b>${job?job.id:it.jobId}</b> — ${esc(it.label)} <span class="issue-meta">(${it.type}${it.who?' — '+esc(it.who):''}, due ${when})</span></span></div>`;
   }).join('') : `<div class="issue-meta">Nothing due in the next 7 days.</div>`;
 
   const attentionParts = [];
   overdue.slice(0,8).forEach(it=>{
     const job = getJob(it.jobId);
-    attentionParts.push(`<div class="brief-line">${icon('helpCircle')}<span><b>${job?job.id:it.jobId}</b> — ${esc(it.label)} <span class="issue-meta">(${it.type}, overdue)</span></span></div>`);
+    attentionParts.push(`<div class="brief-line">${icon('helpCircle')}<span><b>${job?job.id:it.jobId}</b> — ${esc(it.label)} <span class="issue-meta">(${it.type}${it.who?' — '+esc(it.who):''}, overdue)</span></span></div>`);
   });
   if(pendingIssues.length){
     const byJob = {};
@@ -4861,6 +4905,7 @@ function renderJob(){
   const openProc = openCount(procurement, job.id, ['Delivered']);
   const openEng = openCount(engineering, job.id, ['Done']);
   const openWaterTests = waterTests.filter(w=>!['Passed','Cancelled'].includes(w.status)).length;
+  const openActionItems = openActionItemsFor(job.id).length;
 
   let body = '';
   if(ui.tab==='fieldkit') body = renderFieldToolKit(job, isForeman);
@@ -4923,7 +4968,7 @@ function renderJob(){
         {key:'safety', label:'Safety Docs'},
         {key:'watertest', label:'Water Testing', count:openWaterTests},
         {key:'notes', label:'Notes'},
-        {key:'meetingminutes', label:'Meeting Minutes'},
+        {key:'meetingminutes', label:'Meeting Minutes', count:openActionItems},
         {key:'aar', label:'After Action Report'}
       ].filter(t=>tabAllowedForCurrentUser(t.key)).sort((a,b)=>a.label.localeCompare(b.label)).map(t=>
         `<div class="tab ${ui.tab===t.key?'active':''}" onclick="setTab('${t.key}')">${esc(t.label)}${t.count!=null?`<span class="count">${t.count}</span>`:''}</div>`
@@ -7369,8 +7414,9 @@ function renderMeetingMinutes(job, meetings){
     </div>`;
   }).join('');
   return `
+    ${renderActionItemsSection(job)}
     <div class="panel-head"><h3>Meeting Minutes</h3><button class="btn sm safety" ${disabledAttr()} onclick="openModal('meeting')">${icon('plus')} Log a meeting</button></div>
-    <div class="issue-meta" style="margin-bottom:12px;">Meeting date, who was there, and a running list of items discussed. Scan a handwritten page the same way Notes does, and turn any item with a date on it straight into a Schedule task.</div>
+    <div class="issue-meta" style="margin-bottom:12px;">Meeting date, who was there, and a running list of items discussed. Scan a handwritten page the same way Notes does, and turn any item straight into an action item above.</div>
     ${meetings.length===0 ? emptyBlock('notebook','No meetings logged yet on this job.') : rows}`;
 }
 function submitMeetingMinutes(){
@@ -7417,10 +7463,9 @@ function meetingMinutesDetailHTML(m){
           <div style="font-size:13.5px; white-space:pre-wrap;">${esc(it.text)}</div>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end; flex-shrink:0;">
-          ${it.dueDate ? (it.converted
-            ? `${badge('Converted')}<div class="issue-meta">On Schedule</div>`
-            : `<button class="btn sm safety" ${disabledAttr()} onclick="convertMeetingItemToReminder('${m.id}','${it.id}')">${icon('calendarEvent')} Convert to reminder</button>`)
-            : ''}
+          ${it.converted
+            ? `${badge('Converted')}<div class="issue-meta">Action item created</div>`
+            : `<button class="btn sm safety" ${disabledAttr()} onclick="convertMeetingItemToActionItem('${m.id}','${it.id}')">${icon('circleCheck')} Make action item</button>`}
           <button class="btn sm secondary" ${disabledAttr()} onclick="deleteMeetingMinutesItem('${m.id}','${it.id}')">${icon('trash')}</button>
         </div>
       </div>
@@ -7436,7 +7481,7 @@ function meetingMinutesDetailHTML(m){
         <div id="note-scan-status" class="issue-meta" style="margin-top:6px;"></div>
         <input type="file" id="note-scan-input" accept="image/*" capture="environment" style="display:none;">
       </div>
-      <div class="field"><label>Due date (optional — adds a "Convert to reminder" button)</label><input type="date" id="mtg-item-date"></div>
+      <div class="field"><label>Due date (optional — carries over to the action item)</label><input type="date" id="mtg-item-date"></div>
       <button class="btn sm safety" onclick="submitMeetingMinutesItem('${m.id}')">${icon('plus')} Add item</button>
     </div>`}
     ${(m.items||[]).length===0 ? `<div class="issue-meta" style="padding:6px 0;">No items logged yet.</div>` : itemRows}
@@ -7459,30 +7504,140 @@ function deleteMeetingMinutesItem(mtgId, itemId){
   commit({type:'deleteMeetingMinutesItem', mtgId, itemId});
   refreshMeetingMinutesDetail(mtgId);
 }
-// Idempotent — mirrors convertToCO/createCOFromIssue: creates the Schedule
-// task first, then flags the item Converted with the task's id, same
-// two-commit shape as convertToCO (addCo, then convertIssue). Once
-// item.converted is true the button in meetingMinutesDetailHTML is gone
-// (replaced by the Converted badge), so this can't double-fire from the UI.
-function convertMeetingItemToReminder(mtgId, itemId){
+/* ===================== ACTION ITEMS =====================
+   Follow-ups that come out of a meeting (or get typed in cold) and actually
+   have to get done. Deliberately NOT Schedule tasks: a Schedule task is field
+   work — it sits on the install calendar, feeds the Superintendent's all-jobs
+   view, and counts toward manpower loading. "Call the GC about the glass
+   release" is none of those things, and shouldn't move a crew number.
+   Instead these ride the SAME collectLookAhead() feed every other due-dated
+   record already uses, so one source change lights up both the home-screen
+   Look ahead list and the PM briefing's reminders/needs-attention cards —
+   no second dashboard to remember to check.
+   Visibility: a Foreman sees only the items they own (the filter lives in
+   collectLookAhead, next to the existing isJobVisible one); every other role
+   sees every item on the jobs they can already see, which is the existing
+   isJobVisible rule, untouched. ---- */
+const ACTION_ITEM_OPEN = 'Open';
+const ACTION_ITEM_DONE = 'Done';
+
+function actionItemsFor(jobId){ return (state.actionItems||[]).filter(a=>a.jobId===jobId); }
+function openActionItemsFor(jobId){ return actionItemsFor(jobId).filter(a=>a.status!==ACTION_ITEM_DONE); }
+function actionItemOwnerName(a){
+  if(!a || !a.ownerId) return '';
+  const m = state.team.find(x=>x.id===a.ownerId);
+  return m ? m.name : (a.ownerName||'');
+}
+function actionItemOwnerOptionsHTML(selectedId){
+  const people = state.team.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  return `<option value="">Unassigned</option>` + people.map(m=>
+    `<option value="${m.id}" ${selectedId===m.id?'selected':''}>${esc(m.name)}${m.role?' — '+esc(m.role):''}</option>`).join('');
+}
+// Same ok/warn/over day thresholds renderLookAhead's dueCls and the Post-it
+// board's due badge already use — not reimplemented, so the colors mean the
+// same thing here they do everywhere else in the app.
+function actionItemDueHTML(a){
+  if(!a.dueDate || a.status===ACTION_ITEM_DONE) return '';
+  const days = daysBetweenStr(todayStr(), a.dueDate);
+  let label, cls;
+  if(days<0){ label = Math.abs(days)+'d overdue'; cls='over'; }
+  else if(days===0){ label = 'Due today'; cls='warn'; }
+  else if(days<=7){ label = days+'d out'; cls='warn'; }
+  else { label = days+'d out'; cls='ok'; }
+  return `<span class="hrs-pct ${cls}">${label}</span>`;
+}
+function actionItemIsOverdue(a){
+  return a.status!==ACTION_ITEM_DONE && !!a.dueDate && daysBetweenStr(todayStr(), a.dueDate)<0;
+}
+function makeActionItem(jobId, text, ownerId, dueDate, meetingId){
+  if(!state.actionItems) state.actionItems = [];
+  return {
+    id: nextId('actionItems', jobId, 'AI'), jobId,
+    text: (text||'').trim(),
+    ownerId: ownerId||'', dueDate: dueDate||'',
+    status: ACTION_ITEM_OPEN,
+    createdDate: todayStr(), createdBy: currentUserName || '',
+    meetingId: meetingId||'', doneDate: ''
+  };
+}
+function submitActionItem(jobId){
+  const textEl = document.getElementById('ai-text');
+  const text = textEl ? textEl.value.trim() : '';
+  if(!text) return;
+  const ownerEl = document.getElementById('ai-owner');
+  const dueEl = document.getElementById('ai-due');
+  const entry = makeActionItem(jobId, text, ownerEl?ownerEl.value:'', dueEl?dueEl.value:'', '');
+  commit({type:'addActionItem', entry});
+  if(textEl) textEl.value = '';
+  render();
+}
+function toggleActionItem(id){
+  const a = (state.actionItems||[]).find(x=>x.id===id);
+  if(!a) return;
+  const next = a.status===ACTION_ITEM_DONE ? ACTION_ITEM_OPEN : ACTION_ITEM_DONE;
+  commit({type:'setActionItemStatus', id, status: next, doneDate: next===ACTION_ITEM_DONE ? todayStr() : ''});
+}
+function setActionItemOwner(id, ownerId){ commit({type:'updateActionItem', id, patch:{ownerId: ownerId||''}}); }
+function setActionItemDue(id, dueDate){ commit({type:'updateActionItem', id, patch:{dueDate: dueDate||''}}); }
+function deleteActionItem(id){ commit({type:'deleteActionItem', id}); }
+
+function actionItemRowHTML(a){
+  const done = a.status===ACTION_ITEM_DONE;
+  const owner = actionItemOwnerName(a);
+  const cls = done ? 'done' : (actionItemIsOverdue(a) ? 'over' : '');
+  return `<div class="ai-row ${cls}">
+    <input type="checkbox" ${done?'checked':''} ${disabledAttr()} onchange="toggleActionItem('${a.id}')" aria-label="Mark ${esc(a.id)} done">
+    <div class="ai-main">
+      <div class="ai-text">${esc(a.text)}</div>
+      <div class="ai-meta">
+        <span class="issue-meta">${a.id}</span>
+        <select ${disabledAttr()} onchange="setActionItemOwner('${a.id}', this.value)" aria-label="Owner of ${esc(a.id)}">${actionItemOwnerOptionsHTML(a.ownerId)}</select>
+        <input type="date" value="${a.dueDate||''}" ${disabledAttr()} onchange="setActionItemDue('${a.id}', this.value)" aria-label="Due date for ${esc(a.id)}">
+        ${actionItemDueHTML(a)}
+        ${!owner?`<span class="issue-meta">Unassigned</span>`:''}
+        ${done && a.doneDate?`<span class="issue-meta">Done ${a.doneDate}</span>`:''}
+        ${a.meetingId?`<span class="issue-meta">From ${esc(a.meetingId)}</span>`:''}
+      </div>
+    </div>
+    <button class="btn sm secondary" ${disabledAttr()} onclick="deleteActionItem('${a.id}')">${icon('trash')}</button>
+  </div>`;
+}
+
+function renderActionItemsSection(job){
+  const all = actionItemsFor(job.id);
+  const open = all.filter(a=>a.status!==ACTION_ITEM_DONE)
+    .sort((a,b)=>(a.dueDate||'9999-99-99').localeCompare(b.dueDate||'9999-99-99'));
+  const done = all.filter(a=>a.status===ACTION_ITEM_DONE)
+    .sort((a,b)=>(b.doneDate||'').localeCompare(a.doneDate||'')).slice(0,10);
+  const overdue = open.filter(actionItemIsOverdue).length;
+  return `<div class="section" style="margin-bottom:24px;">
+    <div class="panel-head"><h3>Action items</h3>
+      <span class="issue-meta">${open.length} open${overdue?` · ${overdue} overdue`:''}</span></div>
+    <div class="issue-meta" style="margin:-6px 0 12px;">Follow-ups that have to get done. Anything with a due date shows up on the home screen under Look ahead and in the PM briefing, so you don't have to come back here to remember it.</div>
+    ${readOnly ? '' : `
+    <div class="ai-add">
+      <div class="field" style="margin:0;"><label>What needs to happen</label><input type="text" id="ai-text" placeholder="Call the GC about the glass release"></div>
+      <div class="field" style="margin:0;"><label>Owner</label><select id="ai-owner">${actionItemOwnerOptionsHTML('')}</select></div>
+      <div class="field" style="margin:0;"><label>Due date</label><input type="date" id="ai-due"></div>
+      <button class="btn safety" onclick="submitActionItem('${job.id}')">${icon('plus')} Add</button>
+    </div>`}
+    ${open.length ? open.map(actionItemRowHTML).join('') : `<div class="issue-meta" style="padding:4px 0;">Nothing open right now.</div>`}
+    ${done.length ? `<div class="section-title" style="margin-top:16px;">Recently completed</div>${done.map(actionItemRowHTML).join('')}` : ''}
+  </div>`;
+}
+// Idempotent, exactly like the Schedule-task version this replaced (and like
+// convertToCO before it): the action item is created first, then the minutes
+// item is flagged converted with that item's id, so it can only ever fire
+// once — the button is gone from the UI the moment item.converted is true.
+function convertMeetingItemToActionItem(mtgId, itemId){
   const m = state.meetingMinutes.find(x=>x.id===mtgId);
   const item = m && (m.items||[]).find(x=>x.id===itemId);
   if(!item || item.converted) return;
-  const start = item.dueDate || todayStr();
-  const task = {
-    id: nextId('schedule', m.jobId, 'TSK'), jobId: m.jobId,
-    name: item.text.slice(0,120),
-    trade: '', manpower: 0, duration: 1,
-    originalStart: start, currentStart: start, actualStart: '',
-    status: 'Not Started', delayReason: '', linkedIssueId: '',
-    priority: 'Medium', dueDate: item.dueDate,
-    notes: [], attachments: []
-  };
-  commit({type:'addTask', entry: task});
-  commit({type:'convertMeetingMinutesItem', mtgId, itemId, taskId: task.id});
+  const entry = makeActionItem(m.jobId, (item.text||'').slice(0,300), '', item.dueDate||'', m.id);
+  commit({type:'addActionItem', entry});
+  commit({type:'convertMeetingMinutesItem', mtgId, itemId, taskId: entry.id});
   refreshMeetingMinutesDetail(mtgId);
 }
-
 /* ---- Requests: a PM-authored log of what was asked of the field, and its status.
    The request itself is emailed from a separate application — Nucleus just tracks it. ---- */
 function isImageAttachment(a){ return /^data:image\//.test((a && a.dataUrl) || ''); }
