@@ -807,6 +807,32 @@
 .ai-add{display:grid;grid-template-columns:1fr 200px 160px auto;gap:10px;align-items:end;margin:0 0 14px}
 .ai-add .btn{height:38px}
 @media (max-width:760px){ .ai-add{grid-template-columns:1fr} .ai-add .btn{width:100%} }
+/* ---- Home to-do + calendar band ---- */
+.tdband{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(300px,1fr);gap:22px;align-items:start;margin:0 0 4px}
+.tdband.single{grid-template-columns:1fr}
+.tdband-col{min-width:0}
+@media (max-width:1100px){ .tdband{grid-template-columns:1fr} }
+.td-panel{border:1px solid var(--line);border-radius:var(--radius);background:var(--card,#fff);padding:14px 15px;margin-top:28px}
+.td-bucket{margin-bottom:10px}
+.td-bhead{font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--text-muted);margin:0 0 4px;padding-bottom:3px;border-bottom:1px solid var(--line)}
+.td-bhead.over{color:var(--safety-dark)}
+.td-item{display:flex;align-items:flex-start;gap:9px;padding:5px 1px}
+.td-item>input[type=checkbox]{width:17px;height:17px;margin:2px 0 0;flex:none;cursor:pointer}
+.td-body{flex:1;min-width:0;cursor:pointer}
+.td-text{font-size:13px;line-height:1.35;word-break:break-word}
+.td-sub{display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin-top:3px}
+.td-job{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.03em;padding:1px 6px;border-radius:4px;color:#fff}
+.td-add{display:flex;flex-direction:column;gap:7px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.td-addrow{display:flex;gap:7px}
+.td-addrow select{flex:1;min-width:0}
+.td-add input,.td-add select{padding:7px 8px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:12.5px;background:var(--paper)}
+.cal-chip.ai-chip{background:var(--amber-dim);color:var(--amber-dark);display:flex;align-items:center;gap:3px}
+.cal-chip.ai-chip .icon{width:.9em;height:.9em;flex-shrink:0}
+/* Equal-width calendar columns: plain 1fr is minmax(auto,1fr), so a long
+   chip widens its whole column — harmless at full page width, visibly
+   lopsided once the calendar shares a row with the to-do panel. */
+.cal-grid{grid-template-columns:repeat(7,minmax(0,1fr))}
+.cal-cell{min-width:0}
 </style>
 
 <div class="topbar">
@@ -2159,6 +2185,16 @@ function applyOp(op, s){
     }
     case 'addUnitElevation': (s.unitElevations = s.unitElevations||[]).push(op.elev); break;
     case 'deleteUnitElevation': s.unitElevations = (s.unitElevations||[]).filter(x=>x.id!==op.id); break;
+    case 'addUnitElevationSheets': {
+      const e = (s.unitElevations||[]).find(x=>x.id===op.elevId);
+      if(e){ e.sheets = e.sheets || []; e.sheets.push(...op.attachments); }
+      break;
+    }
+    case 'removeUnitElevationSheet': {
+      const e = (s.unitElevations||[]).find(x=>x.id===op.elevId);
+      if(e) e.sheets = (e.sheets||[]).filter((_,i)=>i!==op.index);
+      break;
+    }
     case 'addUnitToElevation': {
       const e = (s.unitElevations||[]).find(x=>x.id===op.elevId);
       if(e && !(e.units||[]).some(u=>u.tag===op.unit.tag)) (e.units = e.units||[]).push(op.unit);
@@ -3245,17 +3281,16 @@ function renderHome(){
   }).join('');
   app.innerHTML = `
     ${banner}
+    ${renderTodoCalendarBand()}
     <div class="home-head"><div><h2>Your jobs</h2><p>${jobs.length} ${jobs.length===state.jobs.length?'active':'assigned to you'} — tap a job to open its RFIs, change orders, cost impacts, and logs.</p></div>${newJobBtn}</div>
     <div class="job-grid">${cards}</div>
     ${renderEngineeringManagerOverviewSection()}
     ${renderLookAhead()}
     ${renderOpsContractCostOverview()}
     ${renderOpsCalendarSection()}
-    ${renderPMCalendarSection()}
     ${renderPMNotesOverviewSection()}
     ${renderSuperintendentScheduleSection()}
     ${renderEngineeringCalendarSection()}
-    ${renderHomeCalendar()}
     ${renderBriefing()}`;
 }
 /* ===================== RENDER: STANDARDS PAGE ===================== */
@@ -4561,20 +4596,11 @@ function collectLookAhead(){
     if(e.status==='Done') return;
     items.push({type:'Drafting', jobId:e.jobId, label:e.title, date:e.dateNeeded, status:e.status, tab:'engineering'});
   });
-  (state.actionItems||[]).forEach(a=>{
-    if(a.status==='Done') return;
-    items.push({type:'Action item', jobId:a.jobId, label:a.text, date:a.dueDate, status:a.status,
-                tab:'meetingminutes', ownerId:a.ownerId||'', who:actionItemOwnerName(a)});
-  });
-  // Action items are the one source here that is owned by a person, so they
-  // carry one extra visibility rule on top of isJobVisible: a Foreman sees
-  // only the items assigned to them (an unassigned item is nobody's, so it
-  // stays off their list too). Every other role keeps the plain job-visibility
-  // rule, unchanged — see the ACTION ITEMS block for the full reasoning.
-  const meLA = getEffectiveTeamMember();
-  const foremanLA = !!(meLA && meLA.role==='Foreman');
-  const visible = items.filter(it=>isJobVisible(it.jobId)
-    && !(foremanLA && it.type==='Action item' && it.ownerId!==meLA.id));
+  // Action items deliberately do NOT feed this list: they have their own
+  // panel at the top of the home screen (renderTodoPanel), which sits above
+  // both Look ahead and the PM briefing that reads this same feed — putting
+  // them here too would show every to-do twice on one screen.
+  const visible = items.filter(it=>isJobVisible(it.jobId));
   visible.sort((a,b)=>(a.date||'9999-99-99').localeCompare(b.date||'9999-99-99'));
   return visible;
 }
@@ -4721,7 +4747,8 @@ function renderCalendarLegend(jobsForLegend, opts){
     <span class="legend-item"><span class="legend-swatch" style="background:var(--good-dim); border:1.5px solid var(--good-dark);"></span>Complete</span>
     <span class="legend-item"><span class="legend-swatch" style="background:var(--safety-dim); border:1.5px solid var(--safety-dark);"></span>Delayed${opts.showRequest?' / open request':''}</span>
     ${opts.showProcurement!==false?`<span class="legend-item"><span class="legend-swatch" style="background:var(--proc-dim); border:1.5px solid var(--proc-dark);"></span>Procurement — material needed</span>`:''}
-    ${opts.showGc?`<span class="legend-item"><span class="legend-swatch" style="background:var(--gc-dim); border:1.5px solid var(--gc-dark);"></span>GC coordination log</span>`:''}`;
+    ${opts.showGc?`<span class="legend-item"><span class="legend-swatch" style="background:var(--gc-dim); border:1.5px solid var(--gc-dark);"></span>GC coordination log</span>`:''}
+    ${opts.showTodo?`<span class="legend-item"><span class="legend-swatch" style="background:var(--amber-dim); border:1.5px solid var(--amber-dark);"></span>To-do due</span>`:''}`;
   return `<div class="cal-legend">
     ${jobItems ? `<div class="legend-row">${jobItems}</div>` : ''}
     <div class="legend-row" style="${jobItems?'margin-top:6px;':''}">${statusItems}</div>
@@ -4739,7 +4766,7 @@ function renderHomeCalendar(){
   // isn't engineering-relevant. Every other role is unchanged.
   const me = getEffectiveTeamMember();
   if(me && ['Operations Manager','Superintendent','Engineering Manager'].includes(me.role)) return '';
-  if(state.schedule.length===0 && state.procurement.length===0 && state.requests.length===0) return '';
+  if(state.schedule.length===0 && state.procurement.length===0 && state.requests.length===0 && (state.actionItems||[]).length===0) return '';
   const month = ui.homeMonth || currentMonthStr();
   const cells = buildMonthDays(month);
   const today = todayStr();
@@ -4749,6 +4776,7 @@ function renderHomeCalendar(){
     const dayTasks = state.schedule.filter(t=> isJobVisible(t.jobId) && t.status!=='Complete' && t.currentStart && dateStr >= t.currentStart && dateStr <= addDaysStr(t.currentStart, Math.max(1,t.duration||1)-1));
     const dayProc = state.procurement.filter(p=> isJobVisible(p.jobId) && p.status!=='Delivered' && p.neededBy===dateStr);
     const dayReq = state.requests.filter(r=> isJobVisible(r.jobId) && r.status!=='Closed' && r.dueDate===dateStr);
+    const dayTodo = homeTodoItems().filter(a=> a.dueDate===dateStr);
     const dnum = Number(dateStr.slice(8,10));
     const taskChips = dayTasks.map(t=>{
       const job = getJob(t.jobId);
@@ -4765,13 +4793,18 @@ function renderHomeCalendar(){
       const label = `${job?job.id+': ':''}${r.title}`;
       return `<div class="cal-chip click-only req-chip" style="border-left:4px solid ${jobColor(r.jobId)};" onclick="openJob('${r.jobId}','requests')" title="${esc(label)}">${icon('helpCircle')}${esc(label)}</div>`;
     }).join('');
+    const todoChips = dayTodo.map(a=>{
+      const job = getJob(a.jobId);
+      const label = `${job?job.id+': ':''}${a.text}`;
+      return `<div class="cal-chip click-only ai-chip" style="border-left:4px solid ${jobColor(a.jobId)};" onclick="openJob('${a.jobId}','meetingminutes')" title="${esc(label)}">${icon('circleCheck')}${esc(label)}</div>`;
+    }).join('');
     return `<div class="cal-cell${dateStr===today?' cal-today':''}">
       <div class="cal-daynum">${dnum}</div>
-      ${taskChips}${procChips}${reqChips}
+      ${taskChips}${procChips}${reqChips}${todoChips}
     </div>`;
   }).join('');
   return `
-    <div class="panel-head" style="margin-top:28px;"><h3>Combined calendar — start dates, material dates &amp; requests, all jobs</h3>
+    <div class="panel-head" style="margin-top:28px;"><h3>Calendar — start dates, material dates, requests &amp; to-dos, all jobs</h3>
       <div style="display:flex; gap:8px;">
         <button class="btn sm secondary" onclick="shiftHomeMonth(-1)">${icon('arrowLeft')}</button>
         <span style="align-self:center; font-family:var(--mono); font-size:12.5px; min-width:110px; text-align:center;">${monthLabel(month)}</span>
@@ -4780,7 +4813,7 @@ function renderHomeCalendar(){
     </div>
     <div class="issue-meta" style="margin-bottom:6px;">Every job's calendar, merged into one. Each chip is striped in its job's color; tap a chip to jump straight to that job.</div>
     <div class="cal-grid">${dayHeaders}${cellsHtml}</div>
-    ${renderCalendarLegend(visibleJobs().slice().sort((a,b)=>a.id.localeCompare(b.id)), {showRequest:true})}`;
+    ${renderCalendarLegend(visibleJobs().slice().sort((a,b)=>a.id.localeCompare(b.id)), {showRequest:true, showTodo:true})}`;
 }
 function shiftHomeMonth(delta){
   const month = ui.homeMonth || currentMonthStr();
@@ -4790,6 +4823,124 @@ function shiftHomeMonth(delta){
   render();
 }
 
+/* ===================== HOME: TO-DOS + CALENDAR BAND =====================
+   Greg: "These action items will mainly be for the Project Manager to stay on
+   top of all tasks for each job... Main Page where they can see a main
+   calendar and to dos."
+   So the two things a PM works from every morning sit side by side at the very
+   top of the home screen — the combined all-jobs calendar (renderHomeCalendar,
+   moved up here from the bottom of the page and now carrying action-item
+   chips) and a cross-job to-do list. The single-job PM calendar that used to
+   sit mid-page (renderPMCalendarSection) is no longer mounted: this band's
+   calendar covers every assigned job at once, color-coded, so picking one job
+   at a time from a dropdown stopped earning its place.
+   The list is deliberately WORKABLE, not another readout: the checkbox closes
+   an item out without leaving the home screen, and the add row captures a
+   follow-up the moment it occurs to you instead of making you navigate into a
+   job's Meeting Minutes tab first. New items default to the person adding
+   them; reassigning happens on the job tab where the full list lives.
+   Because these now have their own panel above the fold, action items were
+   pulled back OUT of collectLookAhead() — Look ahead (and the PM briefing that
+   reads the same feed) is field tasks, materials, PM requests and drafting
+   again, so nothing shows up twice on one screen. ---- */
+function homeTodoItems(){
+  const me = getEffectiveTeamMember();
+  const foreman = !!(me && me.role==='Foreman');
+  return (state.actionItems||[])
+    .filter(a=>a.status!==ACTION_ITEM_DONE && isJobVisible(a.jobId))
+    .filter(a=>!(foreman && a.ownerId!==me.id))
+    .sort((a,b)=>(a.dueDate||'9999-99-99').localeCompare(b.dueDate||'9999-99-99'));
+}
+// An item with no due date belongs in its own bucket rather than nowhere —
+// plenty of PM follow-ups never get a date, and before this panel existed they
+// appeared on no home-screen surface at all.
+function todoBucket(a){
+  if(!a.dueDate) return 'none';
+  const d = daysBetweenStr(todayStr(), a.dueDate);
+  if(d<0) return 'over';
+  if(d===0) return 'today';
+  if(d<=7) return 'week';
+  return 'later';
+}
+function homeTodoRowHTML(a, meId){
+  const owner = actionItemOwnerName(a);
+  const job = getJob(a.jobId);
+  const days = a.dueDate ? daysBetweenStr(todayStr(), a.dueDate) : null;
+  let due = '';
+  if(days!=null){
+    if(days<0) due = `<span class="hrs-pct over">${Math.abs(days)}d overdue</span>`;
+    else if(days===0) due = `<span class="hrs-pct warn">Due today</span>`;
+    else if(days<=7) due = `<span class="hrs-pct warn">${days}d out</span>`;
+    else due = `<span class="issue-meta">${a.dueDate}</span>`;
+  }
+  return `<div class="td-item">
+    <input type="checkbox" ${disabledAttr()} onchange="toggleActionItem('${a.id}')" aria-label="Mark ${esc(a.id)} done">
+    <div class="td-body" onclick="openJob('${a.jobId}','meetingminutes')" title="Open ${esc(a.jobId)} — Meeting Minutes">
+      <div class="td-text">${esc(a.text)}</div>
+      <div class="td-sub">
+        <span class="td-job" style="background:${jobColor(a.jobId)};">${esc(job?job.id:a.jobId)}</span>
+        ${due}
+        ${a.ownerId && a.ownerId!==meId && owner ? `<span class="issue-meta">${esc(owner)}</span>` : ''}
+        ${!a.ownerId ? `<span class="issue-meta">Unassigned</span>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+function renderTodoPanel(){
+  const jobs = visibleJobs();
+  if(jobs.length===0) return '';
+  const me = getEffectiveTeamMember();
+  const meId = me ? me.id : '';
+  const items = homeTodoItems();
+  const grouped = {};
+  items.forEach(a=>{ const b = todoBucket(a); (grouped[b] = grouped[b]||[]).push(a); });
+  const body = [['over','Overdue'],['today','Today'],['week','This week'],['later','Later'],['none','No date']]
+    .filter(([k])=>grouped[k] && grouped[k].length)
+    .map(([k,label])=>`<div class="td-bucket"><div class="td-bhead${k==='over'?' over':''}">${label} &middot; ${grouped[k].length}</div>${grouped[k].map(a=>homeTodoRowHTML(a, meId)).join('')}</div>`)
+    .join('');
+  const jobOpts = jobs.slice().sort((a,b)=>a.id.localeCompare(b.id))
+    .map(j=>`<option value="${j.id}">${esc(j.id)}</option>`).join('');
+  return `<div class="td-panel">
+    <div class="panel-head" style="margin:0 0 4px;"><h3>To-dos</h3>
+      <span class="issue-meta">${items.length} open${grouped.over?` &middot; ${grouped.over.length} overdue`:''}</span></div>
+    <div class="issue-meta" style="margin:0 0 10px;">Every open action item across your jobs. Tick one off right here — you don't have to open the job.</div>
+    ${body || `<div class="issue-meta" style="padding:8px 0;">Nothing open. Anything added here or on a job's Meeting Minutes tab shows up in this list.</div>`}
+    ${readOnly ? '' : `<div class="td-add">
+      <input type="text" id="td-text" placeholder="Add a to-do&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault();submitHomeTodo();}">
+      <div class="td-addrow">
+        <select id="td-job" aria-label="Job this to-do belongs to">${jobOpts}</select>
+        <input type="date" id="td-due" aria-label="Due date">
+        <button class="btn sm safety" onclick="submitHomeTodo()">${icon('plus')} Add</button>
+      </div>
+    </div>`}
+  </div>`;
+}
+function submitHomeTodo(){
+  const textEl = document.getElementById('td-text');
+  const text = textEl ? textEl.value.trim() : '';
+  if(!text) return;
+  const jobEl = document.getElementById('td-job');
+  const dueEl = document.getElementById('td-due');
+  const jobId = jobEl ? jobEl.value : '';
+  if(!jobId) return;
+  const me = getEffectiveTeamMember();
+  commit({type:'addActionItem', entry: makeActionItem(jobId, text, (me && me.id) || '', dueEl?dueEl.value:'', '')});
+  if(textEl) textEl.value = '';
+  render();
+}
+function renderTodoCalendarBand(){
+  const todos = renderTodoPanel();
+  if(!todos) return '';
+  // Roles with their own dedicated calendar (Operations Manager,
+  // Superintendent, Engineering Manager) get '' back from renderHomeCalendar —
+  // the band then runs the to-do list full width rather than putting a third
+  // calendar on their page.
+  const cal = renderHomeCalendar();
+  return `<div class="tdband${cal?'':' single'}">
+    ${cal?`<div class="tdband-col">${cal}</div>`:''}
+    <div class="tdband-col">${todos}</div>
+  </div>`;
+}
 /* ---- Home: PM briefing (auto-organized, not a live chat) ---- */
 function renderBriefing(){
   // Superintendent: not PM-relevant, and their home screen has its own
@@ -8130,7 +8281,7 @@ const UNIT_SKID_STATUS = ['Staged','On site','Set'];
 function seedSlacUnitDiagram(jobId){
   if(!confirm('Load the SLAC elevations (E101-E109) and all 46 skids from the Build Sequence Sheet? Anything already on this tab for this job is replaced.')) return;
   const elevations = SLAC_UNIT_SEED.elevations.map(e=>({
-    id: udId(), jobId, name: e.name,
+    id: udId(), jobId, name: e.name, sheets: [],
     units: e.units.map(t=>({id: udId(), tag: t, set: false}))
   }));
   const skids = SLAC_UNIT_SEED.skids.map(k=>({
@@ -8143,7 +8294,7 @@ function seedSlacUnitDiagram(jobId){
 function addUnitElevation(jobId){
   const name = (prompt('Elevation name (for example E110)')||'').trim().toUpperCase();
   if(!name) return;
-  commit({type:'addUnitElevation', elev:{id: udId(), jobId, name, units: []}});
+  commit({type:'addUnitElevation', elev:{id: udId(), jobId, name, units: [], sheets: []}});
 }
 function deleteUnitElevation(id, name){
   if(!confirm('Remove elevation '+name+' and its unit list from the Unit Diagram?')) return;
@@ -8192,6 +8343,47 @@ function unitSkidLookup(jobId, tag){
   return out;
 }
 
+// Elevation sheets: the marked-up drawing for an elevation, parked on the
+// elevation itself so it's one tap from the checklist instead of a hunt
+// through Specs or the Elevations tab. Same inline-data-URL attachment shape
+// every other document area in the app uses (name/dataUrl/size), same
+// MAX_STATE_BYTES guard before anything is committed — these are shop
+// drawings, so they are the one thing on this tab big enough to matter.
+async function handleUnitSheetSelect(event, elevId){
+  const files = Array.from(event.target.files||[]);
+  const picked = [];
+  for(const file of files){
+    const dataUrl = await readFileAsDataURL(file);
+    if(stateBytes(state) + picked.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
+      alert(`"${file.name}" would push this app's stored data over the limit. Try a smaller file.`);
+      continue;
+    }
+    picked.push({name:file.name, dataUrl, size:file.size});
+  }
+  event.target.value = '';
+  if(picked.length){
+    commit({type:'addUnitElevationSheets', elevId, attachments:picked});
+    render();
+  }
+}
+function removeUnitSheet(elevId, idx){
+  commit({type:'removeUnitElevationSheet', elevId, index:idx});
+  render();
+}
+function unitElevationSheetHTML(e){
+  const sheets = e.sheets || [];
+  const chips = sheets.map((a,i)=>{
+    const short = a.name.length>24 ? a.name.slice(0,22)+'…' : a.name;
+    return `<span class="attach-chip ud-sheetchip">
+      <a href="${a.dataUrl}" target="_blank" rel="noopener" title="Open ${esc(a.name)}">${icon(isImageAttachment(a)?'camera':'fileTypePdf')} ${esc(short)}</a>
+      <button type="button" class="attach-remove" ${disabledAttr()} onclick="removeUnitSheet('${e.id}',${i})" aria-label="Remove ${esc(a.name)}">&times;</button>
+    </span>`;
+  }).join('');
+  if(readOnly) return chips;
+  return `${chips}
+    <button type="button" class="btn sm secondary" onclick="document.getElementById('ud-sheet-${e.id}').click()">${icon('fileUpload')} ${sheets.length?'Add sheet':'Attach sheet'}</button>
+    <input type="file" id="ud-sheet-${e.id}" accept="image/*,application/pdf" multiple style="display:none;" onchange="handleUnitSheetSelect(event,'${e.id}')">`;
+}
 function renderUnitDiagram(job){
   const elevs = unitElevsFor(job.id);
   const skids = unitSkidsFor(job.id);
@@ -8258,6 +8450,7 @@ function renderUnitDiagram(job){
           <div class="ud-card-head">
             <span class="ud-sheet">${esc(e.name)}</span>
             <span class="muted">${done} of ${units.length} set</span>
+            ${unitElevationSheetHTML(e)}
             <span class="spacer"></span>
             <button class="btn sm secondary" ${disabledAttr()} onclick="deleteUnitElevation('${e.id}','${esc(e.name)}')">Remove</button>
           </div>
@@ -12015,6 +12208,11 @@ function shiftPMCalMonth(delta){
   ui.pmCalMonth = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
   render();
 }
+// RETIRED from the home screen: the to-do + calendar band at the top
+// (renderTodoCalendarBand) shows every assigned job at once, color-coded,
+// which is what this one-job-at-a-time picker was standing in for. Left
+// defined rather than deleted so its ui.pmCal* state and any future re-mount
+// still work; it is simply no longer called from renderHome.
 function renderPMCalendarSection(){
   const me = getEffectiveTeamMember();
   if(!me || me.role!=='Project Manager') return '';
