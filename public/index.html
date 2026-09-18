@@ -27,6 +27,10 @@
      blocked network, ad blocker). -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<!-- QR code for the Quick Connect panel. Optional like the libraries above:
+     drawQuickConnectQr() checks `typeof QRious` and falls back to the plain
+     link if this didn't load. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
 <style>
   :root{
     --ink:#12181F;
@@ -860,6 +864,20 @@
 .gc-actbar .spacer{flex:1}
 .task-actid{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.03em;padding:1px 5px;border-radius:4px;background:var(--steel-dim);color:var(--steel-dark);white-space:nowrap}
 @media (max-width:620px){ .gc-actmeta{width:100%;white-space:normal} .gc-actname{white-space:normal} }
+/* ---- Quick connect ---- */
+.qc-grid{display:grid;grid-template-columns:auto minmax(0,1fr);gap:18px;align-items:start}
+.qc-qrbox{border:1px solid var(--line);border-radius:var(--radius);background:#fff;padding:10px;min-width:150px;display:flex;align-items:center;justify-content:center}
+.qc-qrbox canvas{display:block;max-width:100%;height:auto}
+.qc-side{min-width:0}
+.qc-url{font-family:var(--mono);font-size:16px;font-weight:700;word-break:break-all;padding:9px 11px;border:1px solid var(--line);border-radius:6px;background:var(--paper)}
+.qc-steps{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+.qc-steptitle{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-muted);font-weight:700;margin-bottom:4px}
+.qc-steps ol{margin:0;padding-left:17px}
+.qc-steps li{font-size:12.5px;line-height:1.5;margin-bottom:3px}
+.gate-remember{display:flex;align-items:flex-start;gap:9px;margin:2px 0 12px;cursor:pointer}
+.gate-remember input{width:17px;height:17px;margin:1px 0 0;flex:none;cursor:pointer}
+.gate-remember span{font-size:12.5px;line-height:1.4}
+@media (max-width:640px){ .qc-grid{grid-template-columns:1fr} .qc-steps{grid-template-columns:1fr} }
 </style>
 
 <div class="topbar">
@@ -877,6 +895,7 @@
       <button class="home-btn" id="team-btn" onclick="toggleTeamDropdown()" title="Add team members and see who's on each role — pick who you are from the &quot;You&quot; dropdown at the far right"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.5" cy="8" r="3"/><path d="M2.5 19a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.5"/><path d="M14.8 12.2A5 5 0 0 1 21.5 17"/></svg> Team</button>
       <div class="team-dropdown" id="team-dropdown" hidden></div>
     </div>
+    <button class="home-btn" onclick="openModal('quickconnect')" title="Show a QR code and link so a phone or tablet can open Nucleus, and how to add it to a home screen"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM18 18h3v3h-3zM14 20h1M20 14h1"/></svg>Quick Connect</button>
     <button class="home-btn" onclick="openStandardsPage()" title="Company-wide standards and procedures — not tied to any one job"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1Z"/><path d="M6 6h12a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z"/><path d="M9 11h6M9 14h6M9 17h3.5"/></svg> Standards</button>
     <button class="home-btn" onclick="openWeldingLibraryPage()" title="Company-wide welding procedures (WPS/PQR) — not tied to any one job"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.8c1 3-2.6 4.2-2.6 7.2a2.6 2.6 0 0 0 5.2 0c0-.8-.3-1.5-.8-2.1.9.5 2.2 1.8 2.2 4.1a4.9 4.9 0 0 1-9.8 0c0-4.3 3.4-5.3 3.4-9Z"/><path d="M12 21.2c-1.6 0-2.9-1.1-2.9-2.6"/></svg> Welding Procedures</button>
     <button class="home-btn" onclick="openMapPage()" title="See every job's location pinned on a map, to gauge how spread out they are"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.5-7-11.5A7 7 0 0 1 19 9.5C19 14.5 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/></svg> Job Location Map</button>
@@ -2000,8 +2019,37 @@ function stateBytes(s){ return new Blob([JSON.stringify(s)]).size; }
    opt-in upgrade — see server/README.md — without changing anything here;
    the app just asks /api/auth-mode which flow is active. */
 const AUTH_TOKEN_KEY = 'nucleus_auth_token';
-function getAuthToken(){ try{ return localStorage.getItem(AUTH_TOKEN_KEY) || ''; }catch(e){ return ''; } }
-function setAuthToken(token){ try{ if(token) localStorage.setItem(AUTH_TOKEN_KEY, token); else localStorage.removeItem(AUTH_TOKEN_KEY); }catch(e){} }
+const AUTH_PERSIST_KEY = 'nucleus_auth_persist';
+/* "Keep me logged in" — the token has always gone to localStorage, which is why
+   a session survives closing the browser (the server keeps it for 90 days). The
+   checkbox exists for the OPPOSITE case, which matters now that field tablets
+   get handed around: unchecked, the token goes to sessionStorage instead and
+   dies with the browser, so a shared tablet isn't left signed in as one person.
+   Reads check both stores, so an existing signed-in session is unaffected by
+   this change. */
+function getAuthPersist(){
+  try{ return localStorage.getItem(AUTH_PERSIST_KEY) !== '0'; }catch(e){ return true; }
+}
+function setAuthPersist(on){
+  try{ localStorage.setItem(AUTH_PERSIST_KEY, on ? '1' : '0'); }catch(e){}
+}
+function getAuthToken(){
+  try{ return localStorage.getItem(AUTH_TOKEN_KEY) || sessionStorage.getItem(AUTH_TOKEN_KEY) || ''; }
+  catch(e){ return ''; }
+}
+function setAuthToken(token, persist){
+  const keep = (persist === undefined) ? getAuthPersist() : !!persist;
+  try{
+    // Clearing always hits both stores, so signing out can never leave a copy
+    // behind in the one that wasn't in use.
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    if(token){
+      if(keep) localStorage.setItem(AUTH_TOKEN_KEY, token);
+      else sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+    }
+  }catch(e){}
+}
 function authFetch(url, opts){
   opts = opts || {};
   const headers = Object.assign({}, opts.headers || {});
@@ -2030,7 +2078,7 @@ function onSsoMessage(event){
   if(!data || data.type !== 'nucleus-auth') return;
   window.removeEventListener('message', onSsoMessage);
   if(data.error){ showLoginGate(data.error); return; }
-  setAuthToken(data.token);
+  setAuthToken(data.token, true);
   verifiedIdentity = data.identity || null;
   boot();
 }
@@ -2054,6 +2102,9 @@ async function submitLogin(){
   const email = emailEl ? emailEl.value.trim() : '';
   const password = passwordEl ? passwordEl.value : '';
   if(!email || !password){ if(errEl){ errEl.textContent = 'Enter your email and password.'; errEl.style.display='block'; } return; }
+  const rememberEl = document.getElementById('gate-remember');
+  const remember = rememberEl ? !!rememberEl.checked : true;
+  setAuthPersist(remember);
   if(btn) btn.disabled = true;
   try{
     const res = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email, password}) });
@@ -2066,7 +2117,7 @@ async function submitLogin(){
       return;
     }
     const data = await res.json();
-    setAuthToken(data.token);
+    setAuthToken(data.token, remember);
     verifiedIdentity = data.identity || null;
     boot();
   }catch(e){
@@ -2098,6 +2149,10 @@ function showLoginGate(message){
       <div class="field"><label>Password</label>
         <input type="password" id="gate-password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter') submitLogin()">
       </div>
+      <label class="gate-remember">
+        <input type="checkbox" id="gate-remember" ${getAuthPersist()?'checked':''}>
+        <span>Keep me logged in<br><span class="issue-meta">Leave this off on a shared phone or tablet — the session then ends when the browser closes.</span></span>
+      </label>
       <div class="err" id="gate-err"></div>
       <button class="btn safety" id="gate-submit" style="width:100%;" onclick="submitLogin()">Sign in</button>
     </div>`;
@@ -9746,6 +9801,11 @@ function openModal(type){
     const input = document.getElementById('sched-import-input');
     if(input) input.addEventListener('change', handleScheduleImportFile);
   }
+  if(type==='quickconnect'){
+    drawQuickConnectQr();
+    const installBtn = document.getElementById('qc-install');
+    if(installBtn && deferredInstallPrompt) installBtn.style.display = '';
+  }
   if(type==='invoice'){
     document.getElementById('inv-doc-input').addEventListener('change', (e)=>handlePdfSelect(e,'inv-doc-list'));
   }
@@ -9812,6 +9872,7 @@ function openSubmittalModal(specId){
 }
 
 function modalHTML(type){
+  if(type==='quickconnect') return quickConnectModalHTML();
   if(type==='job'){
     return `<div class="modal">
       <h3>New job</h3><p class="sub">Job ID is a 4-letter acronym — it prefixes every RFI, change order, cost impact, and log entry.</p>
@@ -10421,6 +10482,111 @@ function modalHTML(type){
   return '';
 }
 
+/* ===================== QUICK CONNECT =====================
+   Greg: "Can I put a quick connect button to hyperlink to this for a tablet or
+   phone." Nucleus was already an installable PWA — manifest, service worker,
+   icons at every size iOS and Android want — so the missing piece was never the
+   install, it was the handoff: getting the address onto someone else's device
+   without reading it out on a jobsite.
+   This panel shows a scannable QR of whatever origin the app is actually served
+   from (so it is right on nucleuscc.app, on a preview URL, or on any future
+   domain without being hard-coded), the link in large type with a copy button,
+   and the Add-to-Home-Screen steps for both platforms side by side.
+   The QR library loads from cdnjs like SheetJS/Leaflet/pdf.js already do, and
+   is treated the same way: if it didn't load, the panel still shows the link,
+   the copy button and the instructions rather than breaking. ---- */
+function quickConnectUrl(){
+  try{ return window.location.origin || 'https://nucleuscc.app'; }
+  catch(e){ return 'https://nucleuscc.app'; }
+}
+// Captured so Android/Chrome can offer a real one-tap install. iOS Safari never
+// fires this, which is exactly why the written steps below are not optional.
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e)=>{
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  const btn = document.getElementById('qc-install');
+  if(btn) btn.style.display = '';
+});
+async function installNucleusApp(){
+  if(!deferredInstallPrompt) return;
+  const p = deferredInstallPrompt;
+  deferredInstallPrompt = null;
+  try{ p.prompt(); await p.userChoice; }catch(e){}
+  const btn = document.getElementById('qc-install');
+  if(btn) btn.style.display = 'none';
+}
+function drawQuickConnectQr(){
+  const canvas = document.getElementById('qc-qr');
+  const fallback = document.getElementById('qc-qr-fallback');
+  if(!canvas) return;
+  if(typeof QRious === 'undefined'){
+    canvas.style.display = 'none';
+    if(fallback) fallback.style.display = '';
+    return;
+  }
+  try{
+    new QRious({ element: canvas, value: quickConnectUrl(), size: 240, level: 'M',
+                 background: '#ffffff', foreground: '#12181F', padding: 8 });
+    if(fallback) fallback.style.display = 'none';
+  }catch(e){
+    canvas.style.display = 'none';
+    if(fallback) fallback.style.display = '';
+  }
+}
+function copyQuickConnectLink(){
+  const url = quickConnectUrl();
+  const say = (msg)=>{ const el = document.getElementById('qc-copied'); if(el){ el.textContent = msg; el.style.display=''; } };
+  // No alert()/prompt() anywhere in this app — a blocking native dialog has
+  // frozen a tab here before. Inline confirmation only.
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(()=>say('Link copied.'), ()=>say('Couldn\'t copy — select the address above and copy it by hand.'));
+      return;
+    }
+  }catch(e){}
+  try{
+    const ta = document.createElement('textarea');
+    ta.value = url; ta.setAttribute('readonly',''); ta.style.position='absolute'; ta.style.left='-9999px';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+    say('Link copied.');
+  }catch(e){ say('Couldn\'t copy — select the address above and copy it by hand.'); }
+}
+function quickConnectModalHTML(){
+  const url = quickConnectUrl();
+  return `<div class="modal" style="max-width:600px;">
+    <h3>Quick connect</h3>
+    <p class="sub">Point a phone or tablet camera at the code, or send the link. They still sign in with their own email and password.</p>
+    <div class="qc-grid">
+      <div class="qc-qrbox">
+        <canvas id="qc-qr" width="240" height="240"></canvas>
+        <div id="qc-qr-fallback" class="issue-meta" style="display:none; padding:16px; text-align:center;">
+          The QR code needs an internet connection to draw. Use the address below instead.
+        </div>
+      </div>
+      <div class="qc-side">
+        <div class="qc-url">${esc(url)}</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+          <button class="btn sm" onclick="copyQuickConnectLink()">${icon('paperclip')} Copy link</button>
+          <button class="btn sm secondary" id="qc-install" style="display:none;" onclick="installNucleusApp()">${icon('plus')} Install on this device</button>
+        </div>
+        <div id="qc-copied" class="issue-meta" style="display:none; margin-top:6px;"></div>
+        <div class="qc-steps">
+          <div>
+            <div class="qc-steptitle">iPhone / iPad</div>
+            <ol><li>Open the link in <b>Safari</b> — Add to Home Screen only works there, not Chrome.</li><li>Tap the Share button.</li><li>Tap <b>Add to Home Screen</b>.</li></ol>
+          </div>
+          <div>
+            <div class="qc-steptitle">Android</div>
+            <ol><li>Open the link in <b>Chrome</b>.</li><li>Tap the ⋮ menu.</li><li>Tap <b>Install app</b> (or Add to Home screen).</li></ol>
+          </div>
+        </div>
+        <div class="issue-meta" style="margin-top:8px;">It opens full screen with its own icon — same login, same data, nothing to install from an app store.</div>
+      </div>
+    </div>
+    <div class="modal-actions"><button class="btn secondary" onclick="closeModal()">Close</button></div>
+  </div>`;
+}
 function showErr(msg){
   const e = document.getElementById('f-err');
   e.textContent = msg; e.style.display='block';
