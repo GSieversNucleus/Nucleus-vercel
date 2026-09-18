@@ -804,8 +804,9 @@
 .ai-row.done .ai-text{text-decoration:line-through;color:var(--text-muted)}
 .ai-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
 .ai-meta select,.ai-meta input[type=date]{font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--paper);font-family:inherit}
-.ai-add{display:grid;grid-template-columns:1fr 200px 160px auto;gap:10px;align-items:end;margin:0 0 14px}
+.ai-add{display:grid;grid-template-columns:1fr 165px 175px 150px auto;gap:10px;align-items:end;margin:0 0 14px}
 .ai-add .btn{height:38px}
+@media (max-width:1150px){ .ai-add{grid-template-columns:1fr 1fr} }
 @media (max-width:760px){ .ai-add{grid-template-columns:1fr} .ai-add .btn{width:100%} }
 /* ---- Home to-do + calendar band ---- */
 .tdband{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(300px,1fr);gap:22px;align-items:start;margin:0 0 4px}
@@ -825,6 +826,7 @@
 .td-add{display:flex;flex-direction:column;gap:7px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
 .td-addrow{display:flex;gap:7px}
 .td-addrow select{flex:1;min-width:0}
+.td-addrow input[type=date]{flex:1;min-width:0}
 .td-add input,.td-add select{padding:7px 8px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:12.5px;background:var(--paper)}
 .cal-chip.ai-chip{background:var(--amber-dim);color:var(--amber-dark);display:flex;align-items:center;gap:3px}
 .cal-chip.ai-chip .icon{width:.9em;height:.9em;flex-shrink:0}
@@ -833,6 +835,13 @@
    lopsided once the calendar shares a row with the to-do panel. */
 .cal-grid{grid-template-columns:repeat(7,minmax(0,1fr))}
 .cal-cell{min-width:0}
+/* ---- Action item subject tags ---- */
+.td-subj{font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;font-weight:700;padding:1.5px 6px;border-radius:4px;background:var(--gray-dim,#ececec);color:var(--text-muted);white-space:nowrap}
+.td-subj.s-submittal{background:var(--steel-dim);color:var(--steel-dark)}
+.td-subj.s-rfi{background:var(--proc-dim);color:var(--proc-dark)}
+.td-subj.s-order{background:var(--amber-dim);color:var(--amber-dark)}
+.td-subj.s-change-order{background:var(--safety-dim);color:var(--safety-dark)}
+.td-subj.s-log-inefficiencies{background:var(--gc-dim);color:var(--gc-dark)}
 </style>
 
 <div class="topbar">
@@ -1555,9 +1564,9 @@ function searchApp(query){
     .map(r=>({jobId:r.jobId, tab:'requests', title:`${r.id} — ${r.title}`, snippet:jobLabel(r.jobId)})));
   pushGroup('Notes', state.notes.filter(n=>inScope(n.jobId) && matches(n.text,n.author,n.category))
     .map(n=>({jobId:n.jobId, tab:'notes', title:n.text, snippet:jobLabel(n.jobId)+(n.author?` · ${n.author}`:'')+(n.category?` · ${n.category}`:'')})));
-  pushGroup('Action items', (state.actionItems||[]).filter(a=>inScope(a.jobId) && matches(a.id,a.text,actionItemOwnerName(a)))
+  pushGroup('Action items', (state.actionItems||[]).filter(a=>inScope(a.jobId) && matches(a.id,a.text,actionItemOwnerName(a),actionItemSubject(a)))
     .map(a=>({jobId:a.jobId, tab:'meetingminutes', title:a.text,
-      snippet:jobLabel(a.jobId)+(actionItemOwnerName(a)?` · ${actionItemOwnerName(a)}`:'')+(a.dueDate?` · due ${a.dueDate}`:'')+(a.status==='Done'?' · done':'')})));
+      snippet:jobLabel(a.jobId)+` · ${actionItemSubject(a)}`+(actionItemOwnerName(a)?` · ${actionItemOwnerName(a)}`:'')+(a.dueDate?` · due ${a.dueDate}`:'')+(a.status==='Done'?' · done':'')})));
   pushGroup('Logs', state.logs.filter(l=>inScope(l.jobId) && matches(l.note,l.author))
     .map(l=>({jobId:l.jobId, tab:'alllogs', title:l.note, snippet:jobLabel(l.jobId)+(l.author?` · ${l.author}`:'')})));
   pushGroup('Elevations', state.elevations.filter(el=>inScope(el.jobId) && (matches(el.id,el.name,el.drawingRef,el.notes) || (el.foremanNotes||[]).some(n=>matches(n.text))))
@@ -4879,6 +4888,7 @@ function homeTodoRowHTML(a, meId){
       <div class="td-text">${esc(a.text)}</div>
       <div class="td-sub">
         <span class="td-job" style="background:${jobColor(a.jobId)};">${esc(job?job.id:a.jobId)}</span>
+        ${actionItemSubjectChipHTML(a)}
         ${due}
         ${a.ownerId && a.ownerId!==meId && owner ? `<span class="issue-meta">${esc(owner)}</span>` : ''}
         ${!a.ownerId ? `<span class="issue-meta">Unassigned</span>` : ''}
@@ -4909,6 +4919,9 @@ function renderTodoPanel(){
       <input type="text" id="td-text" placeholder="Add a to-do&hellip;" onkeydown="if(event.key==='Enter'){event.preventDefault();submitHomeTodo();}">
       <div class="td-addrow">
         <select id="td-job" aria-label="Job this to-do belongs to">${jobOpts}</select>
+        <select id="td-subject" aria-label="Subject">${actionItemSubjectOptionsHTML('')}</select>
+      </div>
+      <div class="td-addrow">
         <input type="date" id="td-due" aria-label="Due date">
         <button class="btn sm safety" onclick="submitHomeTodo()">${icon('plus')} Add</button>
       </div>
@@ -4923,8 +4936,9 @@ function submitHomeTodo(){
   const dueEl = document.getElementById('td-due');
   const jobId = jobEl ? jobEl.value : '';
   if(!jobId) return;
+  const subjEl = document.getElementById('td-subject');
   const me = getEffectiveTeamMember();
-  commit({type:'addActionItem', entry: makeActionItem(jobId, text, (me && me.id) || '', dueEl?dueEl.value:'', '')});
+  commit({type:'addActionItem', entry: makeActionItem(jobId, text, (me && me.id) || '', dueEl?dueEl.value:'', '', subjEl?subjEl.value:'')});
   if(textEl) textEl.value = '';
   render();
 }
@@ -7671,6 +7685,24 @@ function deleteMeetingMinutesItem(mtgId, itemId){
    isJobVisible rule, untouched. ---- */
 const ACTION_ITEM_OPEN = 'Open';
 const ACTION_ITEM_DONE = 'Done';
+// Greg's own list, in his order. 'Other' is last and is the fallback for any
+// item created without a subject (including one converted from a meeting
+// minutes line, where the subject isn't known at conversion time).
+const ACTION_ITEM_SUBJECTS = ['Submittal','RFI','Order','Change Order','Log Inefficiencies','Other'];
+const ACTION_ITEM_SUBJECT_DEFAULT = 'Other';
+function actionItemSubject(a){
+  const s = a && a.subject;
+  return ACTION_ITEM_SUBJECTS.includes(s) ? s : ACTION_ITEM_SUBJECT_DEFAULT;
+}
+function actionItemSubjectOptionsHTML(selected){
+  const sel = ACTION_ITEM_SUBJECTS.includes(selected) ? selected : ACTION_ITEM_SUBJECT_DEFAULT;
+  return ACTION_ITEM_SUBJECTS.map(v=>`<option value="${esc(v)}" ${sel===v?'selected':''}>${esc(v)}</option>`).join('');
+}
+function actionItemSubjectChipHTML(a){
+  const v = actionItemSubject(a);
+  return `<span class="td-subj s-${v.toLowerCase().replace(/\s+/g,'-')}">${esc(v)}</span>`;
+}
+function setActionItemSubject(id, subject){ commit({type:'updateActionItem', id, patch:{subject: ACTION_ITEM_SUBJECTS.includes(subject)?subject:ACTION_ITEM_SUBJECT_DEFAULT}}); }
 
 function actionItemsFor(jobId){ return (state.actionItems||[]).filter(a=>a.jobId===jobId); }
 function openActionItemsFor(jobId){ return actionItemsFor(jobId).filter(a=>a.status!==ACTION_ITEM_DONE); }
@@ -7700,12 +7732,13 @@ function actionItemDueHTML(a){
 function actionItemIsOverdue(a){
   return a.status!==ACTION_ITEM_DONE && !!a.dueDate && daysBetweenStr(todayStr(), a.dueDate)<0;
 }
-function makeActionItem(jobId, text, ownerId, dueDate, meetingId){
+function makeActionItem(jobId, text, ownerId, dueDate, meetingId, subject){
   if(!state.actionItems) state.actionItems = [];
   return {
     id: nextId('actionItems', jobId, 'AI'), jobId,
     text: (text||'').trim(),
     ownerId: ownerId||'', dueDate: dueDate||'',
+    subject: ACTION_ITEM_SUBJECTS.includes(subject) ? subject : ACTION_ITEM_SUBJECT_DEFAULT,
     status: ACTION_ITEM_OPEN,
     createdDate: todayStr(), createdBy: currentUserName || '',
     meetingId: meetingId||'', doneDate: ''
@@ -7717,7 +7750,8 @@ function submitActionItem(jobId){
   if(!text) return;
   const ownerEl = document.getElementById('ai-owner');
   const dueEl = document.getElementById('ai-due');
-  const entry = makeActionItem(jobId, text, ownerEl?ownerEl.value:'', dueEl?dueEl.value:'', '');
+  const subjEl = document.getElementById('ai-subject');
+  const entry = makeActionItem(jobId, text, ownerEl?ownerEl.value:'', dueEl?dueEl.value:'', '', subjEl?subjEl.value:'');
   commit({type:'addActionItem', entry});
   if(textEl) textEl.value = '';
   render();
@@ -7742,6 +7776,7 @@ function actionItemRowHTML(a){
       <div class="ai-text">${esc(a.text)}</div>
       <div class="ai-meta">
         <span class="issue-meta">${a.id}</span>
+        <select ${disabledAttr()} onchange="setActionItemSubject('${a.id}', this.value)" aria-label="Subject of ${esc(a.id)}">${actionItemSubjectOptionsHTML(a.subject)}</select>
         <select ${disabledAttr()} onchange="setActionItemOwner('${a.id}', this.value)" aria-label="Owner of ${esc(a.id)}">${actionItemOwnerOptionsHTML(a.ownerId)}</select>
         <input type="date" value="${a.dueDate||''}" ${disabledAttr()} onchange="setActionItemDue('${a.id}', this.value)" aria-label="Due date for ${esc(a.id)}">
         ${actionItemDueHTML(a)}
@@ -7768,6 +7803,7 @@ function renderActionItemsSection(job){
     ${readOnly ? '' : `
     <div class="ai-add">
       <div class="field" style="margin:0;"><label>What needs to happen</label><input type="text" id="ai-text" placeholder="Call the GC about the glass release"></div>
+      <div class="field" style="margin:0;"><label>Subject</label><select id="ai-subject">${actionItemSubjectOptionsHTML('')}</select></div>
       <div class="field" style="margin:0;"><label>Owner</label><select id="ai-owner">${actionItemOwnerOptionsHTML('')}</select></div>
       <div class="field" style="margin:0;"><label>Due date</label><input type="date" id="ai-due"></div>
       <button class="btn safety" onclick="submitActionItem('${job.id}')">${icon('plus')} Add</button>
@@ -7784,7 +7820,7 @@ function convertMeetingItemToActionItem(mtgId, itemId){
   const m = state.meetingMinutes.find(x=>x.id===mtgId);
   const item = m && (m.items||[]).find(x=>x.id===itemId);
   if(!item || item.converted) return;
-  const entry = makeActionItem(m.jobId, (item.text||'').slice(0,300), '', item.dueDate||'', m.id);
+  const entry = makeActionItem(m.jobId, (item.text||'').slice(0,300), '', item.dueDate||'', m.id, ACTION_ITEM_SUBJECT_DEFAULT);
   commit({type:'addActionItem', entry});
   commit({type:'convertMeetingMinutesItem', mtgId, itemId, taskId: entry.id});
   refreshMeetingMinutesDetail(mtgId);
