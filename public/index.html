@@ -745,6 +745,55 @@
     .kanban-board{ grid-template-columns:1fr 1fr; }
     .tabs{ flex:0 0 156px; }
   }
+/* ---- Unit Diagram tab ---- */
+.ud-stats{display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--card);overflow:hidden;margin:0 0 12px}
+.ud-stat{flex:1 1 140px;padding:10px 14px;border-right:1px solid var(--line)}
+.ud-stat:last-child{border-right:0}
+.ud-stat b{display:block;font-family:var(--mono);font-size:20px;font-weight:700;line-height:1.15}
+.ud-stat span{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
+.ud-viewbar{display:flex;gap:8px;margin:0 0 14px;flex-wrap:wrap}
+.ud-kitbar{display:flex;gap:6px;margin:0 0 14px;flex-wrap:wrap}
+.ud-card{padding:12px;margin:0 0 12px;background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:10px}
+.ud-card-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px}
+.ud-sheet{font-family:var(--mono);font-size:16px;font-weight:700;letter-spacing:.02em;border:1.5px solid var(--ink);border-radius:4px;padding:1px 8px}
+.ud-chips{display:flex;flex-wrap:wrap;gap:8px}
+.ud-chip{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 2px 0 0;overflow:hidden}
+.ud-chip.set{border-color:var(--good);background:var(--good-dim)}
+.ud-chip label{display:flex;align-items:center;gap:7px;padding:7px 9px;cursor:pointer;margin:0;min-height:34px}
+.ud-chip input[type=checkbox]{width:17px;height:17px;margin:0;flex:none;cursor:pointer}
+.ud-tag{font-family:var(--mono);font-size:13px;font-weight:600;white-space:nowrap}
+.ud-chip.set .ud-tag{color:var(--good-dark)}
+.ud-badge{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--steel-dark);background:var(--steel-dim);border-radius:4px;padding:2px 6px;margin-right:4px;white-space:nowrap}
+.ud-badge.none{color:var(--amber-dark);background:var(--amber-dim)}
+.ud-addrow{display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap}
+.ud-addrow input{flex:1;min-width:150px;padding:7px 9px;border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:13px;text-transform:uppercase}
+.ud-kitblock{margin:0 0 20px}
+.ud-kithead{margin:0 0 10px;padding-bottom:5px;border-bottom:2px solid var(--ink);font-size:16px}
+.ud-skidgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;align-items:start}
+.ud-skid{padding:11px;background:var(--card,#fff);border:1px solid var(--line,#ddd);border-radius:10px}
+.ud-skid.done .ud-card-head{background:var(--good-dim);margin:-11px -11px 10px;padding:9px 11px;border-radius:var(--radius) var(--radius) 0 0}
+.ud-status{font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--line);border-radius:5px;padding:4px 8px;background:var(--paper);cursor:pointer}
+.ud-status[data-s="Staged"]{background:var(--amber-dim);color:var(--amber-dark);border-color:var(--amber)}
+.ud-status[data-s="On site"]{background:var(--steel-dim);color:var(--steel-dark);border-color:var(--steel)}
+.ud-status[data-s="Set"]{background:var(--good-dim);color:var(--good-dark);border-color:var(--good)}
+.ud-rail{font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--text-muted);border-bottom:1px dashed var(--line);padding-bottom:2px;margin-bottom:5px}
+.ud-rail.front{border-bottom:0;border-top:1px dashed var(--line);padding:2px 0 0;margin:5px 0 0;text-align:right}
+.ud-slot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:5px 7px;border:1px solid var(--line);border-left:3px solid var(--gray-dim);border-radius:6px;background:var(--paper);margin-bottom:4px}
+.ud-slot.set{background:var(--good-dim);border-color:var(--good)}
+.ud-slot.back{border-left-color:var(--safety)}
+.ud-slot.front{border-left-color:var(--steel)}
+.ud-slot label{display:flex;align-items:center;gap:7px;margin:0;cursor:pointer;min-height:30px}
+.ud-slot input[type=checkbox]{width:17px;height:17px;margin:0;flex:none;cursor:pointer}
+.ud-slotno{font-family:var(--mono);font-size:11px;color:var(--text-muted);width:16px;text-align:center;flex:none}
+.ud-slotmeta{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)}
+.ud-glass{font-family:var(--mono);font-size:10.5px;color:var(--text-muted);margin-left:auto;white-space:nowrap}
+.ud-wt{width:66px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;font-family:var(--mono);font-size:12px;flex:none}
+.ud-wtline{margin-top:8px;padding-top:7px;border-top:1px solid var(--line);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)}
+.ud-wtline b{font-family:var(--mono);font-size:13px;color:var(--ink);letter-spacing:0}
+@media (max-width:520px){
+  .ud-skidgrid{grid-template-columns:1fr}
+  .ud-glass{margin-left:0}
+}
 </style>
 
 <div class="topbar">
@@ -1245,7 +1294,7 @@ function submitEditTeamMember(id){
 // 'meetingminutes' (Feature H) sits right after 'notes' — same coordination
 // tool, no financial data, and (per the FOREMAN_ALLOWED_TABS comment below)
 // visible to the exact same roles Notes already is, Foreman included.
-const JOB_TAB_ORDER = ['fieldkit','overview','scope','specs','submittals','elevations','contacts','rfis','costs','changeorders','budgetcosts','contract','hours','requests','engineering','schedule','procurement','safety','watertest','notes','meetingminutes','aar'];
+const JOB_TAB_ORDER = ['fieldkit','overview','scope','specs','submittals','elevations','unitdiagram','contacts','rfis','costs','changeorders','budgetcosts','contract','hours','requests','engineering','schedule','procurement','safety','watertest','notes','meetingminutes','aar'];
 // 'elevations' and 'costs' were REMOVED from this list per Greg's request:
 // "Take away costs and elevations on the side bar for Foreman. They should
 // have everything in their Field Tool Kit section." A Foreman no longer gets
@@ -1259,7 +1308,7 @@ const JOB_TAB_ORDER = ['fieldkit','overview','scope','specs','submittals','eleva
 // real standalone tab via that person's tabOverrides (see "Per-person tab
 // overrides" below) — removing them from this default list only changes what
 // a Foreman sees with no override set.
-const FOREMAN_ALLOWED_TABS = ['fieldkit','scope','specs','submittals','contacts','rfis','requests','schedule','procurement','safety','watertest','notes','meetingminutes','aar','alllogs'];
+const FOREMAN_ALLOWED_TABS = ['fieldkit','scope','specs','submittals','unitdiagram','contacts','rfis','requests','schedule','procurement','safety','watertest','notes','meetingminutes','aar','alllogs'];
 // "Contract" (contract + Green Sheet documents, and the budget-by-system table keyed
 // in from the Green Sheet) is the one tab that works the other way round from the
 // Foreman restriction above: it's hidden from everyone EXCEPT Operations Manager and
@@ -1278,6 +1327,7 @@ const OVERRIDABLE_TABS = [
   {key:'specs', label:'Specs'},
   {key:'submittals', label:'Submittals'},
   {key:'elevations', label:'Elevations'},
+  {key:'unitdiagram', label:'Unit Diagram'},
   {key:'contacts', label:'Contacts'},
   {key:'rfis', label:'RFIs'},
   {key:'costs', label:'Costs'},
@@ -1748,7 +1798,7 @@ let readOnly = false;
 let stateVersion = 0;
 let pollTimer = null;
 
-function defaultState(){ return { jobs: [], rfis: [], cos: [], issues: [], logs: [], hours: [], contacts: [], scope: [], specs: [], submittals: [], invoices: [], projectedCosts: [], schedule: [], notes: [], requests: [], elevations: [], procurement: [], ganttLogs: [], scheduleUpdates: [], engineering: [], scheduleFieldNotes: [], team: [], aar: [], gcCommLog: [], greenSheets: [], materials: [], greenSheetQuotes: [], standards: [], safetyDocs: [], weldingProcedures: [], weldingLibrarySeeded: false, waterTests: [], elevationMarkups: [], equipmentLog: [], dailyReports: [], postItBoards: [], meetingMinutes: [], notifications: [], timeOff: [], officeCalendarMemberIds: [] }; }
+function defaultState(){ return { jobs: [], rfis: [], cos: [], issues: [], logs: [], hours: [], contacts: [], scope: [], specs: [], submittals: [], invoices: [], projectedCosts: [], schedule: [], notes: [], requests: [], elevations: [], unitElevations: [], unitSkids: [], procurement: [], ganttLogs: [], scheduleUpdates: [], engineering: [], scheduleFieldNotes: [], team: [], aar: [], gcCommLog: [], greenSheets: [], materials: [], greenSheetQuotes: [], standards: [], safetyDocs: [], weldingProcedures: [], weldingLibrarySeeded: false, waterTests: [], elevationMarkups: [], equipmentLog: [], dailyReports: [], postItBoards: [], meetingMinutes: [], notifications: [], timeOff: [], officeCalendarMemberIds: [] }; }
 // Migration: legacy single-PM assignment (job.assignedPM, one team-member
 // id) -> multi-PM array (job.assignedPMs), mirroring how assignedForemen has
 // always worked. Called everywhere `state` gets reassigned from a fresh
@@ -2068,7 +2118,7 @@ function applyOp(op, s){
     case 'addJob': s.jobs.push(op.job); break;
     case 'deleteJob':
       s.jobs = s.jobs.filter(j=>j.id!==op.jobId);
-      ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','elevations','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'].forEach(k=>{ s[k] = s[k].filter(x=>x.jobId!==op.jobId); });
+      ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','elevations','unitElevations','unitSkids','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'].forEach(k=>{ s[k] = s[k].filter(x=>x.jobId!==op.jobId); });
       // Per-person job-visibility overrides (see "Per-person job-visibility
       // overrides" near canManageTabOverrides) shouldn't accumulate stale
       // references to a job that no longer exists.
@@ -2084,6 +2134,46 @@ function applyOp(op, s){
     case 'updateJob': {
       const j = s.jobs.find(x=>x.id===op.id);
       if(j) Object.assign(j, op.patch);
+      break;
+    }
+    case 'seedUnitDiagram': {
+      s.unitElevations = (s.unitElevations||[]).filter(x=>x.jobId!==op.jobId).concat(op.elevations);
+      s.unitSkids = (s.unitSkids||[]).filter(x=>x.jobId!==op.jobId).concat(op.skids);
+      break;
+    }
+    case 'addUnitElevation': (s.unitElevations = s.unitElevations||[]).push(op.elev); break;
+    case 'deleteUnitElevation': s.unitElevations = (s.unitElevations||[]).filter(x=>x.id!==op.id); break;
+    case 'addUnitToElevation': {
+      const e = (s.unitElevations||[]).find(x=>x.id===op.elevId);
+      if(e && !(e.units||[]).some(u=>u.tag===op.unit.tag)) (e.units = e.units||[]).push(op.unit);
+      break;
+    }
+    case 'removeUnitFromElevation': {
+      const e = (s.unitElevations||[]).find(x=>x.id===op.elevId);
+      if(e) e.units = (e.units||[]).filter(u=>u.id!==op.unitId);
+      break;
+    }
+    case 'toggleUnitOnElevation': {
+      const e = (s.unitElevations||[]).find(x=>x.id===op.elevId);
+      const u = e && (e.units||[]).find(x=>x.id===op.unitId);
+      if(u) u.set = op.set;
+      break;
+    }
+    case 'toggleUnitFrame': {
+      const k = (s.unitSkids||[]).find(x=>x.id===op.skidId);
+      const f = k && (k.frames||[]).find(x=>x.id===op.frameId);
+      if(f) f.set = op.set;
+      break;
+    }
+    case 'setUnitSkidStatus': {
+      const k = (s.unitSkids||[]).find(x=>x.id===op.skidId);
+      if(k) k.status = op.status;
+      break;
+    }
+    case 'setUnitWeight': {
+      const k = (s.unitSkids||[]).find(x=>x.id===op.skidId);
+      const f = k && (k.frames||[]).find(x=>x.id===op.frameId);
+      if(f) f.weight = op.weight;
       break;
     }
     case 'addTeamMember': s.team.push(op.member); break;
@@ -2731,6 +2821,7 @@ const ARRAY_UNDO_LABELS = {
   scope:'scope item', schedule:'task', scheduleUpdates:'schedule update',
   notes:'note', meetingMinutes:'meeting minutes entry', requests:'PM request',
   engineering:'engineering item', elevations:'elevation', ganttLogs:'gantt log',
+  unitElevations:'unit diagram elevation',
   scheduleFieldNotes:'field note', gcCommLog:'GC communication log entry',
   greenSheets:'budget line', standards:'standard', safetyDocs:'safety doc',
   weldingProcedures:'welding procedure', waterTests:'water test',
@@ -2752,6 +2843,7 @@ const FLAT_DELETE_UNDO = {
   deleteRequest: {arrayKey:'requests', idField:'id'},
   deleteEngineering: {arrayKey:'engineering', idField:'id'},
   deleteElevation: {arrayKey:'elevations', idField:'id'},
+  deleteUnitElevation: {arrayKey:'unitElevations', idField:'id'},
   deleteGanttLog: {arrayKey:'ganttLogs', idField:'id'},
   deleteScheduleFieldNote: {arrayKey:'scheduleFieldNotes', idField:'id'},
   deleteGcComm: {arrayKey:'gcCommLog', idField:'id'},
@@ -2778,7 +2870,7 @@ const NESTED_DELETE_UNDO = {
   deleteElevationNote: {arrayKey:'elevations', parentField:'id', parentOpField:'elevId', subKey:'foremanNotes', subIdField:'noteId', label:'foreman note'},
   deletePostitNote: {arrayKey:'postItBoards', parentField:'ownerId', parentOpField:'ownerId', subKey:'notes', subIdField:'noteId', label:'sticky note'},
 };
-const JOB_DELETE_CASCADE_KEYS = ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','elevations','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'];
+const JOB_DELETE_CASCADE_KEYS = ['rfis','cos','issues','logs','hours','contacts','scope','specs','submittals','invoices','projectedCosts','schedule','notes','requests','elevations','unitElevations','unitSkids','procurement','ganttLogs','scheduleUpdates','engineering','scheduleFieldNotes','aar','gcCommLog','greenSheets','materials','greenSheetQuotes','equipmentLog','dailyReports','meetingMinutes','notifications'];
 function captureJobDeleteUndo(op){
   const job = state.jobs.find(j=>j.id===op.jobId);
   if(!job) return;
@@ -4777,6 +4869,7 @@ function renderJob(){
   if(ui.tab==='specs') body = renderSpecs(job, specs, submittals);
   if(ui.tab==='submittals') body = renderSubmittalsPage(job, specs, submittals);
   if(ui.tab==='elevations') body = renderElevations(elevations);
+  if(ui.tab==='unitdiagram') body = renderUnitDiagram(job);
   if(ui.tab==='contacts') body = renderContacts(contacts);
   if(ui.tab==='rfis') body = renderRfis(rfis);
   if(ui.tab==='costs') body = renderCosts(job, issues, invoices, cos, isForeman);
@@ -4815,6 +4908,7 @@ function renderJob(){
         {key:'specs', label:'Specs'},
         {key:'submittals', label:'Submittals', count:openSub},
         {key:'elevations', label:'Elevations', count:incompleteElev},
+        {key:'unitdiagram', label:'Unit Diagram', count:unsetUnitFrames(job.id)},
         {key:'contacts', label:'Contacts'},
         {key:'rfis', label:'RFIs', count:openRfi},
         {key:'costs', label:'Costs', count:isForeman?openIss:openIss+openInv},
@@ -7853,6 +7947,228 @@ function elevationDelayDays(el){
   if(!el.actualStart || !el.scheduledStart) return 0;
   return daysBetweenStr(el.scheduledStart, el.actualStart);
 }
+const SLAC_UNIT_SEED = {"elevations":[{"name":"E101","units":["W162A","W165","W174","W175","W176","W177","W178","W181","W182","W183","W184","W185"]},{"name":"E102","units":["W100","W101","W102","W103","W104","W105","W106","W108","W132","W133","W134"]},{"name":"E103","units":["W109","W110","W111","W118","W119","W120","W135"]},{"name":"E103A","units":["W112","W113","W114","W115","W116","W117"]},{"name":"E104","units":["W121","W122","W123","W124","W125","W126","W127","W128","W129","W130","W131","W136"]},{"name":"E105","units":["W137","W138","W139","W139A","W140","W141","W142","W143","W144","W145","W146","W147","W148","W149","W150","W151","W152","W153"]},{"name":"E106","units":["W154","W155"]},{"name":"E107","units":["W154","W155","W156","W157","W158","W159","W160","W161"]},{"name":"E108","units":["W162","W163","W164"]},{"name":"E109","units":["W148","W167","W168","W168A","W169","W170","W170A","W171","W172","W173","W180"]}],"skids":[{"kit":"Kit #1","skid":"SLAC1.1","frames":[{"unit":"W154","level":"1","bay":"G","glass":"GL1-16"},{"unit":"W154","level":"1","bay":"G","glass":"GL1-16"},{"unit":"W156","level":"1","bay":"G","glass":"GL1T-34 GL2-10"},{"unit":"W157","level":"1","bay":"G","glass":"GL1T-34 GL2-10"},{"unit":"W155","level":"2","bay":"G","glass":"GL1-15"}]},{"kit":"Kit #1","skid":"SLAC1.2","frames":[{"unit":"W155","level":"2","bay":"G","glass":"GL1-15"},{"unit":"W158","level":"2","bay":"G","glass":"GL1-17 GL2-9"},{"unit":"W159","level":"2","bay":"G","glass":"GL1-17 GL2-9"},{"unit":"W161","level":"2","bay":"H","glass":"GL1T-36"},{"unit":"W160","level":"2","bay":"H","glass":"GL1T-37 GL1T-35"}]},{"kit":"Kit #1","skid":"SLAC1.3","frames":[{"unit":"W162","level":"1","bay":"J","glass":"GL1-5"},{"unit":"W162","level":"1","bay":"J","glass":"GL1-5"},{"unit":"W163","level":"1","bay":"J","glass":"GL1T-38 GL2-11"},{"unit":"W164","level":"1","bay":"J","glass":"GL1T-38 GL2-11"},{"unit":"W162","level":"1","bay":"J","glass":"GL1-5"}]},{"kit":"Kit #1","skid":"SLAC1.4","frames":[{"unit":"W162","level":"1","bay":"J","glass":"GL1-5"},{"unit":"W162A","level":"1","bay":"A","glass":"GL1-5"},{"unit":"W162A","level":"1","bay":"A","glass":"GL1-5"},{"unit":"W165","level":"1","bay":"A","glass":"GL1-5"},{"unit":"W165","level":"1","bay":"A","glass":"GL1-5"}]},{"kit":"Kit #1","skid":"SLAC1.5","frames":[{"unit":"W167","level":"","bay":"K","glass":"GL1T-40 GL1-18"},{"unit":"W168","level":"","bay":"K","glass":"GL1T-41 GL1-19"},{"unit":"W168","level":"","bay":"K","glass":"GL1T-41 GL1-19"},{"unit":"W168","level":"","bay":"K","glass":"GL1T-41 GL1-19"},{"unit":"W168","level":"","bay":"K","glass":"GL1T-41 GL1-19"}]},{"kit":"Kit #1","skid":"SLAC1.6","frames":[{"unit":"W169","level":"","bay":"K","glass":"GL1T-41 GL1T-39"},{"unit":"W170","level":"","bay":"K","glass":"GL1T-39"},{"unit":"W171","level":"","bay":"K","glass":"GL1T-41 GL1T-39"},{"unit":"W168","level":"","bay":"K","glass":"GL1T-41 GL1-19"},{"unit":"W168","level":"","bay":"K","glass":"GL1T-41 GL1-19"}]},{"kit":"Kit #2","skid":"SLAC2.1","frames":[{"unit":"W168","level":"2","bay":"K","glass":"GL1T-41 GL1-19"},{"unit":"W168A","level":"2","bay":"K","glass":"GL1T-41 GL1-19"},{"unit":"W172","level":"2","bay":"K","glass":"GL1T-42 GL1T-39"},{"unit":"W170A","level":"2","bay":"K","glass":"GL1T-39"},{"unit":"W171","level":"2","bay":"K","glass":"GL1T-41 GL1T-39"}]},{"kit":"Kit #2","skid":"SLAC2.2","frames":[{"unit":"W168","level":"2","bay":"K","glass":"GL1T-41 GL1-19"},{"unit":"W168","level":"2","bay":"K","glass":"GL1T-41 GL1-19"},{"unit":"W168A","level":"2","bay":"K","glass":"GL1T-41 GL1-19"},{"unit":"W173","level":"2","bay":"K","glass":"GL1T-43"},{"unit":"W174","level":"2","bay":"A","glass":"GL1T-1 GL1-1"}]},{"kit":"Kit #2","skid":"SLAC2.3","frames":[{"unit":"W175","level":"2","bay":"A","glass":"GL1T-2 GL1-2"},{"unit":"W176","level":"2","bay":"A","glass":"GL1T-3 GL1-3"},{"unit":"W177","level":"2","bay":"A","glass":"GL1T-4 GL1-4"},{"unit":"W177","level":"2","bay":"A","glass":"GL1T-4 GL1-4"},{"unit":"W178","level":"2","bay":"A","glass":"GL1T-3 GL1-3"}]},{"kit":"Kit #2","skid":"SLAC2.4","frames":[{"unit":"W179","level":"Roof","bay":"K","glass":"GL2-12"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"}]},{"kit":"Kit #2","skid":"SLAC2.5","frames":[{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"}]},{"kit":"Kit #2","skid":"SLAC2.6","frames":[{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"}]},{"kit":"Kit #2","skid":"SLAC2.7","frames":[{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W148","level":"Roof","bay":"K","glass":"GL2-13"},{"unit":"W180","level":"Roof","bay":"K","glass":"GL2-14"},{"unit":"W181","level":"Roof","bay":"A","glass":"GL2-1"}]},{"kit":"Kit #2","skid":"SLAC2.8","frames":[{"unit":"W183","level":"Roof","bay":"A","glass":"GL2-3"},{"unit":"W182","level":"Roof","bay":"A","glass":"GL2-2"},{"unit":"W184","level":"Roof","bay":"A","glass":"GL2-4"},{"unit":"W184","level":"Roof","bay":"A","glass":"GL2-4"},{"unit":"W185","level":"Roof","bay":"A","glass":"GL2-3"}]},{"kit":"Kit #2","skid":"SLAC2.9","frames":[{"unit":"W137","level":"1","bay":"E","glass":""},{"unit":"W138","level":"1","bay":"E","glass":""},{"unit":"W139","level":"1","bay":"E","glass":""},{"unit":"W140","level":"1","bay":"E","glass":""},{"unit":"W139A","level":"1","bay":"E","glass":""}]},{"kit":"Kit #2","skid":"SLAC2.10","frames":[{"unit":"W138","level":"1","bay":"E","glass":""},{"unit":"W138","level":"1","bay":"E","glass":""},{"unit":"W138","level":"1","bay":"E","glass":""},{"unit":"W138","level":"1","bay":"E","glass":""},{"unit":"W138","level":"1","bay":"E","glass":""}]},{"kit":"Kit #3","skid":"SLAC3.1","frames":[{"unit":"W138","level":"1","bay":"E","glass":""},{"unit":"W138","level":"1","bay":"E","glass":""},{"unit":"W138","level":"1","bay":"E","glass":""},{"unit":"W138","level":"1","bay":"E","glass":""},{"unit":"W138","level":"1","bay":"E","glass":""}]},{"kit":"Kit #3","skid":"SLAC3.2","frames":[{"unit":"W141","level":"1","bay":"E","glass":""},{"unit":"W142","level":"2","bay":"E","glass":""},{"unit":"W143","level":"2","bay":"E","glass":""},{"unit":"W143","level":"2","bay":"E","glass":""},{"unit":"W143","level":"2","bay":"E","glass":""}]},{"kit":"Kit #3","skid":"SLAC3.3","frames":[{"unit":"W143","level":"2","bay":"E","glass":""},{"unit":"W144","level":"2","bay":"E","glass":""},{"unit":"W145","level":"2","bay":"E","glass":""},{"unit":"W143","level":"2","bay":"E","glass":""},{"unit":"W143","level":"2","bay":"E","glass":""}]},{"kit":"Kit #3","skid":"SLAC3.4","frames":[{"unit":"W143","level":"2","bay":"E","glass":""},{"unit":"W143","level":"2","bay":"E","glass":""},{"unit":"W144","level":"2","bay":"E","glass":""},{"unit":"W145","level":"2","bay":"E","glass":""},{"unit":"W143","level":"2","bay":"E","glass":""}]},{"kit":"Kit #3","skid":"SLAC3.5","frames":[{"unit":"W143","level":"2","bay":"E","glass":""},{"unit":"W143","level":"2","bay":"E","glass":""},{"unit":"W146","level":"2","bay":"E","glass":""}]},{"kit":"Kit #3","skid":"SLAC3.6","frames":[{"unit":"W147","level":"RF","bay":"E","glass":""},{"unit":"W148","level":"RF","bay":"E","glass":""},{"unit":"W148","level":"RF","bay":"E","glass":""},{"unit":"W148","level":"RF","bay":"E","glass":""},{"unit":"W148","level":"RF","bay":"E","glass":""}]},{"kit":"Kit #3","skid":"SLAC3.7","frames":[{"unit":"W148","level":"RF","bay":"E","glass":""},{"unit":"W148","level":"RF","bay":"E","glass":""},{"unit":"W148","level":"RF","bay":"E","glass":""},{"unit":"W148","level":"RF","bay":"E","glass":""},{"unit":"W148","level":"RF","bay":"E","glass":""}]},{"kit":"Kit #3","skid":"SLAC3.8","frames":[{"unit":"W148","level":"RF","bay":"E","glass":""},{"unit":"W148","level":"RF","bay":"E","glass":""},{"unit":"W148","level":"RF","bay":"E","glass":""},{"unit":"W148","level":"RF","bay":"E","glass":""}]},{"kit":"Kit #3","skid":"SLAC3.9","frames":[{"unit":"W148","level":"RF","bay":"E","glass":""},{"unit":"W148","level":"RF","bay":"E","glass":""},{"unit":"W149","level":"RF","bay":"E","glass":""}]},{"kit":"Kit #3","skid":"SLAC3.10","frames":[{"unit":"W150","level":"1","bay":"E","glass":""},{"unit":"W151","level":"1","bay":"E","glass":""},{"unit":"W152","level":"2","bay":"E","glass":""},{"unit":"W153","level":"2","bay":"E","glass":""}]},{"kit":"Kit #4","skid":"SLAC4.1","frames":[{"unit":"W154","level":"1","bay":"F","glass":""},{"unit":"W154","level":"1","bay":"F","glass":""},{"unit":"W154","level":"1","bay":"F","glass":""},{"unit":"W154","level":"1","bay":"F","glass":""},{"unit":"W154","level":"1","bay":"F","glass":""}]},{"kit":"Kit #4","skid":"SLAC4.2","frames":[{"unit":"W155","level":"2","bay":"F","glass":""},{"unit":"W155","level":"2","bay":"F","glass":""},{"unit":"W155","level":"2","bay":"F","glass":""},{"unit":"W155","level":"2","bay":"F","glass":""},{"unit":"W155","level":"2","bay":"F","glass":""}]},{"kit":"Kit #4","skid":"SLAC4.3","frames":[{"unit":"W118","level":"","bay":"C","glass":""},{"unit":"W119","level":"","bay":"C","glass":""},{"unit":"W119","level":"","bay":"C","glass":""},{"unit":"W120","level":"","bay":"C","glass":""},{"unit":"W121","level":"","bay":"D","glass":""}]},{"kit":"Kit #4","skid":"SLAC4.4","frames":[{"unit":"W122","level":"","bay":"D","glass":""},{"unit":"W122","level":"","bay":"D","glass":""},{"unit":"W122","level":"","bay":"D","glass":""},{"unit":"W122","level":"","bay":"D","glass":""},{"unit":"W122","level":"","bay":"D","glass":""}]},{"kit":"Kit #4","skid":"SLAC4.5","frames":[{"unit":"W123","level":"","bay":"D","glass":""},{"unit":"W125","level":"","bay":"D","glass":""},{"unit":"W126","level":"","bay":"D","glass":""},{"unit":"W127","level":"","bay":"D","glass":""},{"unit":"W128","level":"","bay":"D","glass":""}]},{"kit":"Kit #4","skid":"SLAC4.6","frames":[{"unit":"W124","level":"","bay":"D","glass":""},{"unit":"W124","level":"","bay":"D","glass":""},{"unit":"W124","level":"","bay":"D","glass":""},{"unit":"W124","level":"","bay":"D","glass":""},{"unit":"W131","level":"","bay":"D","glass":""}]},{"kit":"Kit #4","skid":"SLAC4.7","frames":[{"unit":"W125","level":"","bay":"D","glass":""},{"unit":"W126","level":"","bay":"D","glass":""},{"unit":"W127","level":"","bay":"D","glass":""},{"unit":"W129","level":"","bay":"D","glass":""},{"unit":"W130","level":"","bay":"D","glass":""}]},{"kit":"Kit #5","skid":"SLAC5.1","frames":[{"unit":"W136","level":"2","bay":"D","glass":""},{"unit":"W136","level":"2","bay":"D","glass":""},{"unit":"W136","level":"2","bay":"D","glass":""},{"unit":"W136","level":"2","bay":"D","glass":""},{"unit":"W136","level":"2","bay":"D","glass":""}]},{"kit":"Kit #5","skid":"SLAC5.2","frames":[{"unit":"W135","level":"","bay":"C","glass":""}]},{"kit":"Kit #5","skid":"SLAC5.2","frames":[{"unit":"W100","level":"1","bay":"B","glass":""},{"unit":"W101","level":"1","bay":"B","glass":""},{"unit":"W104","level":"1","bay":"B","glass":""},{"unit":"W101","level":"1","bay":"B","glass":""},{"unit":"W105","level":"1","bay":"B","glass":""}]},{"kit":"Kit #5","skid":"SLAC5.3","frames":[{"unit":"W102","level":"1","bay":"B","glass":""},{"unit":"W103","level":"1","bay":"B","glass":""},{"unit":"W102","level":"1","bay":"B","glass":""},{"unit":"W103","level":"1","bay":"B","glass":""},{"unit":"W102","level":"1","bay":"B","glass":""}]},{"kit":"Kit #5","skid":"SLAC5.4","frames":[{"unit":"W105","level":"1","bay":"B","glass":""},{"unit":"W104","level":"1","bay":"B","glass":""},{"unit":"W101","level":"1","bay":"B","glass":""},{"unit":"W105","level":"1","bay":"B","glass":""}]},{"kit":"Kit #5","skid":"SLAC5.5","frames":[{"unit":"W103","level":"1","bay":"B","glass":""},{"unit":"W102","level":"1","bay":"B","glass":""},{"unit":"W103","level":"1","bay":"B","glass":""},{"unit":"W106","level":"1","bay":"B","glass":""},{"unit":"W106","level":"1","bay":"B","glass":""}]},{"kit":"Kit #5","skid":"SLAC5.6","frames":[{"unit":"W132","level":"2","bay":"B","glass":""},{"unit":"W133","level":"2","bay":"B","glass":""},{"unit":"W132","level":"2","bay":"B","glass":""},{"unit":"W133","level":"2","bay":"B","glass":""},{"unit":"W134","level":"2","bay":"B","glass":""}]},{"kit":"Kit #6","skid":"SLAC6.1","frames":[{"unit":"W134","level":"2","bay":"B","glass":""},{"unit":"W132","level":"2","bay":"B","glass":""},{"unit":"W133","level":"2","bay":"B","glass":""},{"unit":"W134","level":"2","bay":"B","glass":""}]},{"kit":"Kit #6","skid":"SLAC6.2","frames":[{"unit":"W104","level":"1","bay":"B","glass":""},{"unit":"W101","level":"1","bay":"B","glass":""},{"unit":"W132","level":"2","bay":"B","glass":""},{"unit":"W133","level":"2","bay":"B","glass":""}]},{"kit":"Kit #6","skid":"SLAC6.3","frames":[{"unit":"W102","level":"1","bay":"B","glass":""},{"unit":"W108","level":"1","bay":"B","glass":""},{"unit":"W109","level":"1","bay":"C","glass":""},{"unit":"W110","level":"1","bay":"C","glass":""},{"unit":"W110","level":"1","bay":"C","glass":""}]},{"kit":"Kit #6","skid":"SLAC6.4","frames":[{"unit":"W110","level":"1","bay":"C","glass":""},{"unit":"W110","level":"1","bay":"C","glass":""},{"unit":"W110","level":"1","bay":"C","glass":""},{"unit":"W110","level":"1","bay":"C","glass":""},{"unit":"W111","level":"1","bay":"C","glass":""}]},{"kit":"Kit #6","skid":"SLAC6.5","frames":[{"unit":"W112","level":"","bay":"C.1","glass":""},{"unit":"W113","level":"","bay":"C.1","glass":""},{"unit":"W114","level":"","bay":"C.2","glass":""}]},{"kit":"Kit #6","skid":"SLAC6.6","frames":[{"unit":"W115","level":"","bay":"C.2","glass":""},{"unit":"W116","level":"","bay":"C.3","glass":""},{"unit":"W117","level":"","bay":"C.3","glass":""}]}]};
+let udSeq = 0;
+function udId(){ udSeq++; return 'UD-' + Date.now().toString(36) + '-' + udSeq; }
+
+/* ---- Unit Diagram -------------------------------------------------------
+   Two views of the same units on one job: the elevations they belong to, and
+   the skid each one ships on. Checkboxes are ordinary <input type="checkbox">
+   inside a <label>, exactly like the Elevations tab, so the browser owns the
+   checked state and a tap can never fail to register. Every box is its own
+   record &mdash; checking a unit on an elevation never touches the skid, and two
+   frames of the same unit tag on one skid check off separately.
+   Seeded for SLAC from the Kits 1-6 Elevations sheets and the Build Sequence
+   Sheet (CSE mark-ups); any other job starts empty and is built by hand. ---- */
+
+function unitElevsFor(jobId){ return (state.unitElevations||[]).filter(e=>e.jobId===jobId); }
+function unitSkidsFor(jobId){ return (state.unitSkids||[]).filter(k=>k.jobId===jobId); }
+
+function unsetUnitFrames(jobId){
+  let n = 0;
+  unitSkidsFor(jobId).forEach(k=>(k.frames||[]).forEach(f=>{ if(!f.set) n++; }));
+  return n || null;
+}
+
+const UNIT_SKID_STATUS = ['Staged','On site','Set'];
+
+function seedSlacUnitDiagram(jobId){
+  if(!confirm('Load the SLAC elevations (E101-E109) and all 46 skids from the Build Sequence Sheet? Anything already on this tab for this job is replaced.')) return;
+  const elevations = SLAC_UNIT_SEED.elevations.map(e=>({
+    id: udId(), jobId, name: e.name,
+    units: e.units.map(t=>({id: udId(), tag: t, set: false}))
+  }));
+  const skids = SLAC_UNIT_SEED.skids.map(k=>({
+    id: udId(), jobId, kit: k.kit, skid: k.skid, status: 'Staged',
+    frames: k.frames.map(f=>({id: udId(), unit: f.unit, level: f.level, bay: f.bay, glass: f.glass, set: false, weight: null}))
+  }));
+  commit({type:'seedUnitDiagram', jobId, elevations, skids});
+}
+
+function addUnitElevation(jobId){
+  const name = (prompt('Elevation name (for example E110)')||'').trim().toUpperCase();
+  if(!name) return;
+  commit({type:'addUnitElevation', elev:{id: udId(), jobId, name, units: []}});
+}
+function deleteUnitElevation(id, name){
+  if(!confirm('Remove elevation '+name+' and its unit list from the Unit Diagram?')) return;
+  commit({type:'deleteUnitElevation', id});
+}
+function addUnitToElevation(elevId){
+  const input = document.getElementById('ud-add-'+elevId);
+  const tag = ((input&&input.value)||'').trim().toUpperCase().replace(/\s+/g,'');
+  if(!tag) return;
+  if(input) input.value = '';
+  commit({type:'addUnitToElevation', elevId, unit:{id: udId(), tag, set:false}});
+}
+function removeUnitFromElevation(elevId, unitId){
+  commit({type:'removeUnitFromElevation', elevId, unitId});
+}
+function toggleUnitOnElevation(elevId, unitId){
+  const e = (state.unitElevations||[]).find(x=>x.id===elevId);
+  const u = e && (e.units||[]).find(x=>x.id===unitId);
+  if(!u) return;
+  commit({type:'toggleUnitOnElevation', elevId, unitId, set: !u.set});
+}
+function toggleUnitFrame(skidId, frameId){
+  const k = (state.unitSkids||[]).find(x=>x.id===skidId);
+  const f = k && (k.frames||[]).find(x=>x.id===frameId);
+  if(!f) return;
+  commit({type:'toggleUnitFrame', skidId, frameId, set: !f.set});
+}
+function setUnitSkidStatus(skidId, status){
+  commit({type:'setUnitSkidStatus', skidId, status});
+}
+function setUnitFrameWeight(skidId, frameId, val){
+  const n = parseInt(val,10);
+  commit({type:'setUnitWeight', skidId, frameId, weight: (isFinite(n)&&n>0)?n:null});
+}
+function setUnitDiagramView(v){ ui.unitDiagramView = v; render(); }
+function setUnitDiagramKit(k){ ui.unitDiagramKit = k; render(); }
+
+// Which skid(s) a unit tag ships on, for the badge beside it on an elevation.
+function unitSkidLookup(jobId, tag){
+  const out = [];
+  unitSkidsFor(jobId).forEach(k=>{
+    (k.frames||[]).forEach((f,i)=>{
+      if(f.unit===tag) out.push({kit:k.kit, skid:k.skid, slot:i+1, of:(k.frames||[]).length, set:f.set});
+    });
+  });
+  return out;
+}
+
+function renderUnitDiagram(job){
+  const elevs = unitElevsFor(job.id);
+  const skids = unitSkidsFor(job.id);
+  const view = ui.unitDiagramView || 'elevations';
+  const kitFilter = ui.unitDiagramKit || 'all';
+
+  let totalFrames = 0, setFrames = 0;
+  skids.forEach(k=>(k.frames||[]).forEach(f=>{ totalFrames++; if(f.set) setFrames++; }));
+  let totalUnits = 0, setUnits = 0;
+  elevs.forEach(e=>(e.units||[]).forEach(u=>{ totalUnits++; if(u.set) setUnits++; }));
+  const tags = {};
+  skids.forEach(k=>(k.frames||[]).forEach(f=>{ tags[f.unit]=1; }));
+  elevs.forEach(e=>(e.units||[]).forEach(u=>{ tags[u.tag]=1; }));
+
+  if(!elevs.length && !skids.length){
+    return `<div class="section">
+      <div class="section-head"><h3>Unit Diagram</h3></div>
+      <div class="empty">
+        <p>Nothing on the Unit Diagram for this job yet.</p>
+        <p class="muted">Tie unit numbers under each elevation, and keep a skid manifest showing what unit is on what skid under each Kit. Tap a unit to check it off once it is set on the wall; tap it again to clear it.</p>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn" ${disabledAttr()} onclick="seedSlacUnitDiagram('${job.id}')">Load SLAC Kits 1&ndash;6</button>
+          <button class="btn secondary" ${disabledAttr()} onclick="addUnitElevation('${job.id}')">Add elevation</button>
+        </div>
+      </div></div>`;
+  }
+
+  const kits = [];
+  skids.forEach(k=>{ if(!kits.includes(k.kit)) kits.push(k.kit); });
+
+  const stats = `<div class="ud-stats">
+      <div class="ud-stat"><b>${Object.keys(tags).length}</b><span>Units on the job</span></div>
+      <div class="ud-stat"><b>${setUnits} / ${totalUnits}</b><span>Set on elevations</span></div>
+      <div class="ud-stat"><b>${skids.length}</b><span>Skids</span></div>
+      <div class="ud-stat"><b>${setFrames} / ${totalFrames}</b><span>Frames pulled &amp; set</span></div>
+    </div>`;
+
+  const toggle = `<div class="ud-viewbar">
+      <button class="btn sm ${view==='elevations'?'':'secondary'}" onclick="setUnitDiagramView('elevations')">Elevations</button>
+      <button class="btn sm ${view==='skids'?'':'secondary'}" onclick="setUnitDiagramView('skids')">Skid Manifest</button>
+    </div>`;
+
+  let body = '';
+
+  if(view==='elevations'){
+    body = elevs.map(e=>{
+      const units = e.units||[];
+      const done = units.filter(u=>u.set).length;
+      const chips = units.length ? units.map(u=>{
+        const hits = unitSkidLookup(job.id, u.tag);
+        const badge = hits.length
+          ? hits.slice(0,2).map(h=>esc(h.kit.replace(/^Kit\s*#?/i,'K'))+'&middot;'+esc(h.skid.replace(/^SLAC/,''))).join(' / ') + (hits.length>2?' +'+(hits.length-2):'')
+          : 'no skid';
+        return `<div class="ud-chip ${u.set?'set':''}">
+            <label title="${u.set?'Tap to clear the check on ':'Tap when '}${esc(u.tag)}${u.set?'':' is set on the wall'}">
+              <input type="checkbox" ${u.set?'checked':''} ${disabledAttr()} onchange="toggleUnitOnElevation('${e.id}','${u.id}')">
+              <span class="ud-tag">${esc(u.tag)}</span>
+            </label>
+            <span class="ud-badge ${hits.length?'':'none'}">${badge}</span>
+            <button type="button" class="attach-remove" ${disabledAttr()} onclick="removeUnitFromElevation('${e.id}','${u.id}')" aria-label="Remove ${esc(u.tag)}">&times;</button>
+          </div>`;
+      }).join('') : '<span class="muted">No units tied in yet.</span>';
+      return `<div class="ud-card">
+          <div class="ud-card-head">
+            <span class="ud-sheet">${esc(e.name)}</span>
+            <span class="muted">${done} of ${units.length} set</span>
+            <span class="spacer"></span>
+            <button class="btn sm secondary" ${disabledAttr()} onclick="deleteUnitElevation('${e.id}','${esc(e.name)}')">Remove</button>
+          </div>
+          <div class="ud-chips">${chips}</div>
+          <div class="ud-addrow">
+            <input id="ud-add-${e.id}" type="text" placeholder="Add unit &mdash; W154" ${disabledAttr()} onkeydown="if(event.key==='Enter'){event.preventDefault();addUnitToElevation('${e.id}');}">
+            <button class="btn sm" ${disabledAttr()} onclick="addUnitToElevation('${e.id}')">Tie in</button>
+          </div>
+        </div>`;
+    }).join('') + `<div style="margin-top:10px;"><button class="btn secondary" ${disabledAttr()} onclick="addUnitElevation('${job.id}')">Add elevation</button></div>`;
+  } else {
+    const kitBar = `<div class="ud-kitbar">
+        <button class="btn sm ${kitFilter==='all'?'':'secondary'}" onclick="setUnitDiagramKit('all')">All kits</button>
+        ${kits.map(k=>`<button class="btn sm ${kitFilter===k?'':'secondary'}" onclick="setUnitDiagramKit('${esc(k)}')">${esc(k)}</button>`).join('')}
+      </div>`;
+    const shown = kits.filter(k=>kitFilter==='all'||kitFilter===k);
+    body = kitBar + shown.map(kit=>{
+      const ks = skids.filter(k=>k.kit===kit);
+      const cards = ks.map(k=>{
+        const frames = k.frames||[];
+        const doneAll = frames.length && frames.every(f=>f.set);
+        let lbs = 0, known = 0;
+        frames.forEach(f=>{ if(f.weight){ lbs += Number(f.weight); known++; } });
+        const rows = frames.map((f,i)=>`
+            <div class="ud-slot ${f.set?'set':''} ${i===0?'back':''} ${i===frames.length-1?'front':''}">
+              <span class="ud-slotno">${i+1}</span>
+              <label title="${f.set?'Tap to clear the check on ':'Tap when '}${esc(f.unit)}${f.set?'':' is pulled and set'}">
+                <input type="checkbox" ${f.set?'checked':''} ${disabledAttr()} onchange="toggleUnitFrame('${k.id}','${f.id}')">
+                <span class="ud-tag">${esc(f.unit)}</span>
+              </label>
+              <span class="ud-slotmeta">${f.level?('Lvl '+esc(f.level)):''}${f.level&&f.bay?' &middot; ':''}${f.bay?('Bay '+esc(f.bay)):''}</span>
+              <span class="ud-glass">${esc(f.glass||'')}</span>
+              <input type="number" min="0" class="ud-wt" placeholder="lbs" value="${f.weight??''}" ${disabledAttr()} title="Weight of ${esc(f.unit)} in pounds" onchange="setUnitFrameWeight('${k.id}','${f.id}',this.value)">
+            </div>`).join('');
+        return `<div class="ud-skid ${doneAll?'done':''}">
+            <div class="ud-card-head">
+              <span class="ud-sheet">${esc(k.skid)}</span>
+              <span class="muted">${frames.length} frames</span>
+              <span class="spacer"></span>
+              <select class="ud-status" data-s="${esc(k.status||'Staged')}" ${disabledAttr()} onchange="setUnitSkidStatus('${k.id}',this.value)" aria-label="Status of ${esc(k.skid)}">
+                ${UNIT_SKID_STATUS.map(v=>`<option value="${v}" ${(k.status||'Staged')===v?'selected':''}>${v}</option>`).join('')}
+              </select>
+            </div>
+            <div class="ud-rail">Back</div>
+            ${rows}
+            <div class="ud-rail front">Front</div>
+            <div class="ud-wtline">Skid weight ${known? '<b>'+lbs.toLocaleString()+' lbs</b>'+(known<frames.length?(' <span class="muted">('+known+' of '+frames.length+' entered)</span>'):'') : '<span class="muted">&mdash; no unit weights entered</span>'}</div>
+          </div>`;
+      }).join('');
+      return `<div class="ud-kitblock"><h4 class="ud-kithead">${esc(kit)} <span class="muted">${ks.length} skids</span></h4><div class="ud-skidgrid">${cards}</div></div>`;
+    }).join('');
+  }
+
+  return `<div class="section">
+      <div class="section-head">
+        <h3>Unit Diagram</h3>
+        <span class="spacer"></span>
+        ${skids.length? '' : `<button class="btn sm secondary" ${disabledAttr()} onclick="seedSlacUnitDiagram('${job.id}')">Load SLAC Kits 1&ndash;6</button>`}
+      </div>
+      <p class="muted" style="margin:0 0 10px;">Tap a unit to check it off once it is set on the wall, and tap it again to clear it. Every box is its own &mdash; a unit on an elevation is separate from the same tag on a skid, and two frames of one tag on a skid check off separately.</p>
+      ${stats}
+      ${toggle}
+      ${body}
+    </div>`;
+}
+
 function renderElevations(elevations){
   const cards = elevations.map(el=>{
     const items = el.items||[];
