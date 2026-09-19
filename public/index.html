@@ -612,6 +612,37 @@
   .attach-chip{ display:flex; align-items:center; justify-content:space-between; background:#F1EFE8; border-radius:8px; padding:7px 10px; margin-bottom:6px; font-size:12.5px; }
   .attach-chip a{ color:var(--steel-dark); text-decoration:none; font-weight:600; display:inline-flex; align-items:center; gap:6px; }
   .attach-remove{ background:none; border:none; color:var(--safety); cursor:pointer; font-size:14px; padding:0 4px; }
+
+  /* ---------- In-app document viewer ----------
+     Greg: "can you make it pop up on the web app vs downloading the sheet.
+     or give an option to view on browser for a quick look and option to
+     download". A target=_blank link on a PDF obeys the browser's own
+     "download PDFs instead of opening them" setting, which is why sheets were
+     landing in Downloads. Rendering the pages ourselves takes that decision
+     away from the browser. */
+  .doc-viewer{ position:fixed; inset:0; background:rgba(18,24,31,.93); z-index:70; display:flex; flex-direction:column; }
+  .dv-bar{ display:flex; align-items:center; gap:7px; padding:9px 12px; background:var(--ink); color:#fff; flex-wrap:wrap; box-shadow:0 2px 10px rgba(0,0,0,.35); }
+  .dv-title{ font-weight:700; font-size:13px; margin-right:auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:34vw; }
+  .dv-btn{ background:rgba(255,255,255,.09); border:1px solid rgba(255,255,255,.2); color:#fff; border-radius:7px; padding:5px 9px; font-size:12px; font-family:var(--sans); cursor:pointer; display:inline-flex; align-items:center; gap:5px; }
+  .dv-btn:hover{ background:rgba(255,255,255,.18); }
+  .dv-btn:disabled{ opacity:.35; cursor:default; }
+  .dv-btn .icon{ width:15px; height:15px; }
+  .dv-readout{ font-family:var(--mono); font-size:11.5px; color:rgba(255,255,255,.8); min-width:46px; text-align:center; }
+  .dv-body{ flex:1; overflow:auto; display:flex; align-items:flex-start; justify-content:center; padding:16px; }
+  .dv-body canvas, .dv-body img{ background:#fff; border-radius:4px; box-shadow:0 8px 30px rgba(0,0,0,.45); max-width:none; }
+  .dv-msg{ color:rgba(255,255,255,.85); font-size:13px; padding:48px 24px; text-align:center; line-height:1.6; }
+  @media (max-width:700px){
+    .dv-title{ max-width:100%; width:100%; margin-right:0; }
+    .dv-btn span.lbl{ display:none; }
+    .dv-body{ padding:8px; }
+  }
+  /* The sheet chip's name is a button now (it opens the viewer) but has to go
+     on looking exactly like the link it replaced. */
+  .ud-sheet-open{ background:none; border:none; padding:0; font:inherit; color:var(--steel-dark); font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px; text-align:left; }
+  .ud-sheet-open:hover{ text-decoration:underline; }
+  .ud-sheet-dl{ background:none; border:none; color:var(--steel-dark); cursor:pointer; padding:0 6px; display:inline-flex; align-items:center; opacity:.75; }
+  .ud-sheet-dl:hover{ opacity:1; }
+  .ud-sheetchip .ud-chip-actions{ display:inline-flex; align-items:center; gap:2px; }
   /* Tap-to-call — a Contacts phone number as a real tel: link, so tapping it
      on a phone or tablet opens the dialer instead of just displaying digits
      someone has to copy or retype. */
@@ -1029,7 +1060,12 @@ const ICON_PATHS = {
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   sliders: '<path d="M4 6h4M12 6h8M4 12h8M16 12h4M4 18h10M18 18h2"/><circle cx="8.2" cy="6" r="2.1"/><circle cx="14.2" cy="12" r="2.1"/><circle cx="12.2" cy="18" r="2.1"/>',
-  package: '<path d="M21 8.5v7a1 1 0 0 1-.5.87l-8 4.5a1 1 0 0 1-1 0l-8-4.5A1 1 0 0 1 3 15.5v-7a1 1 0 0 1 .5-.87l8-4.5a1 1 0 0 1 1 0l8 4.5a1 1 0 0 1 .5.87Z"/><path d="M3.3 8.2 12 13l8.7-4.8M12 13v8.3"/>'
+  package: '<path d="M21 8.5v7a1 1 0 0 1-.5.87l-8 4.5a1 1 0 0 1-1 0l-8-4.5A1 1 0 0 1 3 15.5v-7a1 1 0 0 1 .5-.87l8-4.5a1 1 0 0 1 1 0l8 4.5a1 1 0 0 1 .5.87Z"/><path d="M3.3 8.2 12 13l8.7-4.8M12 13v8.3"/>',
+  download: '<path d="M12 3v12"/><path d="M8 11.5 12 15.5l4-4"/><path d="M5 18.5h14"/>',
+  zoomIn: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8.5 11h5M11 8.5v5"/>',
+  zoomOut: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8.5 11h5"/>',
+  fitWidth: '<path d="M4 6v12M20 6v12"/><path d="M7.5 12h9"/><path d="M10 9.5 7.5 12l2.5 2.5M14 9.5l2.5 2.5-2.5 2.5"/>',
+  externalLink: '<path d="M14 4h6v6"/><path d="M20 4l-8.5 8.5"/><path d="M19 14v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'
 };
 function icon(name, cls){
   return `<svg class="icon ${cls||''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name]||''}</svg>`;
@@ -9108,13 +9144,34 @@ function removeUnitSheet(elevId, idx){
   commit({type:'removeUnitElevationSheet', elevId, index:idx});
   render();
 }
+/* Looking the sheet up from state by (elevation, index) rather than baking
+   the attachment into the markup: a presigned URL expires, and an inline copy
+   in an onclick attribute would go stale with it. */
+function unitSheetAt(elevId, i){
+  const e = (state.unitElevations||[]).find(x=>x.id===elevId);
+  return e && (e.sheets||[])[i];
+}
+function openUnitSheet(elevId, i){
+  const a = unitSheetAt(elevId, i);
+  if(a) openAttachmentViewer(a);
+}
+function downloadUnitSheet(elevId, i){
+  const a = unitSheetAt(elevId, i);
+  if(a) downloadAttachment(a);
+}
 function unitElevationSheetHTML(e){
   const sheets = e.sheets || [];
   const chips = sheets.map((a,i)=>{
     const short = a.name.length>24 ? a.name.slice(0,22)+'…' : a.name;
+    // The name opens the viewer; the arrow downloads. Two separate
+    // affordances, because "let me glance at this" and "put it on my iPad"
+    // are different jobs.
     return `<span class="attach-chip ud-sheetchip">
-      <a href="${attUrl(a)}" target="_blank" rel="noopener" title="Open ${esc(a.name)}">${icon(isImageAttachment(a)?'camera':'fileTypePdf')} ${esc(short)}</a>
-      <button type="button" class="attach-remove" ${disabledAttr()} onclick="removeUnitSheet('${e.id}',${i})" aria-label="Remove ${esc(a.name)}">&times;</button>
+      <button type="button" class="ud-sheet-open" onclick="openUnitSheet('${e.id}',${i})" title="View ${esc(a.name)}">${icon(isImageAttachment(a)?'camera':'fileTypePdf')} ${esc(short)}</button>
+      <span class="ud-chip-actions">
+        <button type="button" class="ud-sheet-dl" onclick="downloadUnitSheet('${e.id}',${i})" title="Download ${esc(a.name)}" aria-label="Download ${esc(a.name)}">${icon('download')}</button>
+        <button type="button" class="attach-remove" ${disabledAttr()} onclick="removeUnitSheet('${e.id}',${i})" aria-label="Remove ${esc(a.name)}">&times;</button>
+      </span>
     </span>`;
   }).join('');
   if(readOnly) return chips;
@@ -10200,6 +10257,243 @@ function showLightbox(src){
   div.onclick = ()=> div.remove();
   div.innerHTML = `<img src="${src}">`;
   document.body.appendChild(div);
+}
+
+/* ===================== IN-APP DOCUMENT VIEWER =====================
+   Opens a PDF or image inside Nucleus instead of handing it to the browser.
+
+   WHY NOT JUST A LINK: the sheet chips used to be `<a target="_blank">`. A
+   browser with "Download PDF files instead of automatically opening them"
+   turned on — which is a common default on a managed machine — sends those
+   straight to the Downloads folder, which is exactly what Greg hit. Drawing
+   the page onto a canvas ourselves takes that choice away from the browser,
+   so "quick look" always means a quick look.
+
+   PDFs render through pdf.js (already loaded for the spec scanner). If that
+   CDN script didn't load — offline on a job site, say — it falls back to an
+   iframe, and if even that is refused there's still Download and Open in new
+   tab. Images skip pdf.js entirely.
+
+   Works with BOTH attachment shapes, because everything goes through
+   attUrlAsync()/attBytes(). ==================== */
+let docViewer = null;   // { att, url, objectUrl, pdf, page, scale, renderTask }
+
+function closeDocViewer(){
+  if(docViewer){
+    if(docViewer.renderTask){ try{ docViewer.renderTask.cancel(); }catch(e){} }
+    if(docViewer.pdf){ try{ docViewer.pdf.destroy(); }catch(e){} }
+    // The object URL pins the whole file in memory until it's revoked.
+    if(docViewer.objectUrl){ try{ URL.revokeObjectURL(docViewer.objectUrl); }catch(e){} }
+    docViewer = null;
+  }
+  const el = document.getElementById('doc-viewer');
+  if(el) el.remove();
+  document.removeEventListener('keydown', docViewerKeys);
+}
+
+function docViewerKeys(ev){
+  if(!docViewer) return;
+  if(ev.key === 'Escape'){ ev.preventDefault(); closeDocViewer(); return; }
+  if(docViewer.pdf && docViewer.pdf.numPages > 1){
+    if(ev.key === 'ArrowRight' || ev.key === 'PageDown'){ ev.preventDefault(); docViewerPage(1); }
+    else if(ev.key === 'ArrowLeft' || ev.key === 'PageUp'){ ev.preventDefault(); docViewerPage(-1); }
+  }
+}
+
+function docViewerShell(name){
+  return `<div class="dv-bar">
+      <span class="dv-title">${esc(name || 'Document')}</span>
+      <div class="dv-btn-group" id="dv-tools"></div>
+      <button type="button" class="dv-btn" onclick="downloadDocViewer()" title="Download">${icon('download')}<span class="lbl">Download</span></button>
+      <button type="button" class="dv-btn" onclick="openDocViewerTab()" title="Open in a new tab">${icon('externalLink')}<span class="lbl">New tab</span></button>
+      <button type="button" class="dv-btn" onclick="closeDocViewer()" title="Close (Esc)">${icon('x')}<span class="lbl">Close</span></button>
+    </div>
+    <div class="dv-body" id="dv-body"><div class="dv-msg">${icon('loader2','spin')} Loading…</div></div>`;
+}
+
+async function openAttachmentViewer(att){
+  if(!attHasSource(att)) return;
+  closeDocViewer();
+  const el = document.createElement('div');
+  el.className = 'doc-viewer';
+  el.id = 'doc-viewer';
+  el.innerHTML = docViewerShell(att.name);
+  // Clicking the dimmed surround closes; clicking the page itself does not.
+  el.addEventListener('click', (ev)=>{ if(ev.target === el) closeDocViewer(); });
+  document.body.appendChild(el);
+  document.addEventListener('keydown', docViewerKeys);
+  docViewer = { att, page: 1, scale: null };
+
+  const body = document.getElementById('dv-body');
+  let url = '';
+  try{ url = await attUrlAsync(att); }catch(e){ url = ''; }
+  if(!docViewer) return;                 // closed while loading
+  if(!url){
+    if(body) body.innerHTML = `<div class="dv-msg">That file couldn't be retrieved. It may have been removed.</div>`;
+    return;
+  }
+  docViewer.url = url;
+
+  let bytes = null;
+  try{ bytes = await attBytes(att); }catch(e){ bytes = null; }
+  if(!docViewer) return;
+  const type = attType(att) || 'application/octet-stream';
+  if(bytes){
+    // Downloads go through an object URL so the file saves under its real
+    // name rather than the blob store's uuid pathname.
+    docViewer.objectUrl = URL.createObjectURL(new Blob([bytes], {type}));
+  }
+
+  if(isImageAttachment(att)){
+    docViewer.kind = 'image';
+    if(body) body.innerHTML = `<img src="${docViewer.objectUrl || url}" alt="${esc(att.name||'')}">`;
+    updateDocViewerTools();
+    return;
+  }
+
+  if(bytes && typeof pdfjsLib !== 'undefined'){
+    try{
+      // getDocument takes ownership of the buffer it's handed, so give it a
+      // copy — docViewer.objectUrl above still needs the original.
+      docViewer.pdf = await pdfjsLib.getDocument({data: bytes.slice()}).promise;
+      if(!docViewer) return;
+      docViewer.kind = 'pdf';
+      if(body) body.innerHTML = '<canvas id="dv-canvas"></canvas>';
+      await renderDocViewerPage();
+      return;
+    }catch(e){
+      console.warn('pdf.js could not render this file, falling back to the browser:', e);
+      if(!docViewer) return;
+    }
+  }
+
+  /* No iframe fallback, deliberately. Handing a PDF to an <iframe> makes the
+     browser decide what to do with it, and a browser without a PDF plugin —
+     or with "download PDFs instead of opening them" turned on — downloads it.
+     That is the exact surprise this viewer exists to remove, so an
+     unreachable pdf.js says so plainly and leaves both actions in reach
+     rather than quietly dropping a file in Downloads. */
+  docViewer.kind = 'unsupported';
+  if(body){
+    const what = isPdfAttachment(att) ? 'The PDF viewer' : 'A preview for this file type';
+    body.innerHTML = `<div class="dv-msg">${what} couldn't load — you may be offline.<br>Use <strong>Download</strong> or <strong>New tab</strong> above to open it.</div>`;
+  }
+  updateDocViewerTools();
+}
+
+async function renderDocViewerPage(){
+  const v = docViewer;
+  if(!v || !v.pdf) return;
+  const canvas = document.getElementById('dv-canvas');
+  const body = document.getElementById('dv-body');
+  if(!canvas) return;
+  let page;
+  try{ page = await v.pdf.getPage(v.page); }catch(e){ return; }
+  if(docViewer !== v) return;
+  if(v.scale == null){
+    // Default to fitting the width — an elevation sheet is only useful if you
+    // can read it without scrolling sideways first.
+    const base = page.getViewport({scale: 1});
+    const avail = Math.max(300, (body ? body.clientWidth : 900) - 32);
+    v.scale = Math.min(3, Math.max(0.25, avail / base.width));
+  }
+  // Render above CSS resolution so the fine linework on a shop drawing stays
+  // crisp on a tablet, capped so a big sheet doesn't blow up memory.
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const viewport = page.getViewport({scale: v.scale * dpr});
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+  canvas.style.width = Math.floor(viewport.width / dpr) + 'px';
+  canvas.style.height = Math.floor(viewport.height / dpr) + 'px';
+  if(v.renderTask){ try{ v.renderTask.cancel(); }catch(e){} }
+  v.renderTask = page.render({canvasContext: canvas.getContext('2d'), viewport});
+  try{ await v.renderTask.promise; }
+  catch(e){ /* cancelled by a newer render — expected */ }
+  if(docViewer === v) v.renderTask = null;
+  updateDocViewerTools();
+}
+
+function updateDocViewerTools(){
+  const v = docViewer;
+  const tools = document.getElementById('dv-tools');
+  if(!v || !tools) return;
+  if(v.kind === 'pdf'){
+    const multi = v.pdf && v.pdf.numPages > 1;
+    tools.innerHTML = `
+      ${multi ? `<button type="button" class="dv-btn" onclick="docViewerPage(-1)" ${v.page<=1?'disabled':''} title="Previous page">${icon('arrowLeft')}</button>
+      <span class="dv-readout">${v.page} / ${v.pdf.numPages}</span>
+      <button type="button" class="dv-btn" onclick="docViewerPage(1)" ${v.page>=v.pdf.numPages?'disabled':''} title="Next page">${icon('arrowRight')}</button>` : ''}
+      <button type="button" class="dv-btn" onclick="docViewerZoom(1/1.25)" title="Zoom out">${icon('zoomOut')}</button>
+      <span class="dv-readout">${Math.round((v.scale||1)*100)}%</span>
+      <button type="button" class="dv-btn" onclick="docViewerZoom(1.25)" title="Zoom in">${icon('zoomIn')}</button>
+      <button type="button" class="dv-btn" onclick="docViewerFit()" title="Fit to width">${icon('fitWidth')}<span class="lbl">Fit</span></button>`;
+  } else {
+    tools.innerHTML = '';
+  }
+}
+
+function docViewerZoom(mult){
+  const v = docViewer;
+  if(!v || v.kind !== 'pdf') return;
+  v.scale = Math.min(5, Math.max(0.2, (v.scale || 1) * mult));
+  renderDocViewerPage();
+}
+function docViewerFit(){
+  const v = docViewer;
+  if(!v || v.kind !== 'pdf') return;
+  v.scale = null;
+  renderDocViewerPage();
+}
+function docViewerPage(delta){
+  const v = docViewer;
+  if(!v || !v.pdf) return;
+  const next = Math.min(v.pdf.numPages, Math.max(1, v.page + delta));
+  if(next === v.page) return;
+  v.page = next;
+  renderDocViewerPage();
+}
+function openDocViewerTab(){
+  const v = docViewer;
+  if(!v) return;
+  window.open(v.objectUrl || v.url, '_blank', 'noopener');
+}
+function downloadDocViewer(){
+  const v = docViewer;
+  if(!v) return;
+  triggerDownload(v.objectUrl || v.url, (v.att && v.att.name) || 'document');
+}
+
+/* The anchor is removed on a timer, not immediately: with a blob: href
+   Chrome settles the download asynchronously, and yanking the element out of
+   the document first makes it lose the `download` attribute — the file then
+   saves under a uuid instead of its real name. Caught in testing, where the
+   sheet came back as "12bb34c4-….pdf".
+   Note also that `download` is ignored outright on a cross-origin href, which
+   is the other reason callers hand this an object URL rather than the signed
+   blob-store URL. */
+function triggerDownload(href, filename){
+  const link = document.createElement('a');
+  link.href = href;
+  link.download = filename || 'document';
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(()=>{ try{ link.remove(); }catch(e){} }, 2000);
+}
+
+/* Download without opening the viewer first — the small arrow on a chip. */
+async function downloadAttachment(att){
+  if(!attHasSource(att)) return;
+  if(att.dataUrl){ triggerDownload(att.dataUrl, att.name); return; }
+  let bytes = null;
+  try{ bytes = await attBytes(att); }catch(e){ bytes = null; }
+  if(!bytes){
+    showStorageNotice('"' + (att.name || 'That file') + '" could not be downloaded — it may have been removed.');
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([bytes], {type: attType(att) || 'application/octet-stream'}));
+  triggerDownload(url, att.name);
+  setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(e){} }, 20000);
 }
 
 /* ===================== MODALS ===================== */
