@@ -878,6 +878,10 @@
 .gate-remember input{width:17px;height:17px;margin:1px 0 0;flex:none;cursor:pointer}
 .gate-remember span{font-size:12.5px;line-height:1.4}
 @media (max-width:640px){ .qc-grid{grid-template-columns:1fr} .qc-steps{grid-template-columns:1fr} }
+/* ---- Action item log ---- */
+.ail-table td,.ail-table th{vertical-align:top}
+.ail-table tr.ail-done td{color:var(--text-muted)}
+.ail-table tr.ail-done td[data-label="What needs to happen"]{text-decoration:line-through}
 </style>
 
 <div class="topbar">
@@ -7834,7 +7838,8 @@ function renderMeetingMinutes(job, meetings){
     ${renderActionItemsSection(job)}
     <div class="panel-head"><h3>Meeting Minutes</h3><button class="btn sm safety" ${disabledAttr()} onclick="openModal('meeting')">${icon('plus')} Log a meeting</button></div>
     <div class="issue-meta" style="margin-bottom:12px;">Meeting date, who was there, and a running list of items discussed. Scan a handwritten page the same way Notes does, and turn any item straight into an action item above.</div>
-    ${meetings.length===0 ? emptyBlock('notebook','No meetings logged yet on this job.') : rows}`;
+    ${meetings.length===0 ? emptyBlock('notebook','No meetings logged yet on this job.') : rows}
+    <div style="margin-top:26px; padding-top:20px; border-top:1.5px solid var(--line-strong);">${renderActionItemLog(job)}</div>`;
 }
 function submitMeetingMinutes(){
   const date = document.getElementById('f-date').value || todayStr();
@@ -8017,7 +8022,6 @@ function toggleActionItem(id){
 function setActionItemOwner(id, ownerId){ commit({type:'updateActionItem', id, patch:{ownerId: ownerId||''}}); }
 function setActionItemDue(id, dueDate){ commit({type:'updateActionItem', id, patch:{dueDate: dueDate||''}}); }
 function deleteActionItem(id){ commit({type:'deleteActionItem', id}); }
-function toggleActionItemDoneLog(jobId){ ui.aiShowAllDone = (ui.aiShowAllDone===jobId) ? null : jobId; render(); }
 
 function actionItemRowHTML(a){
   const done = a.status===ACTION_ITEM_DONE;
@@ -8034,6 +8038,7 @@ function actionItemRowHTML(a){
         <input type="date" value="${a.dueDate||''}" ${disabledAttr()} onchange="setActionItemDue('${a.id}', this.value)" aria-label="Due date for ${esc(a.id)}">
         ${actionItemDueHTML(a)}
         ${!owner?`<span class="issue-meta">Unassigned</span>`:''}
+        ${a.createdDate?`<span class="issue-meta">Created ${a.createdDate}</span>`:''}
         ${done && a.doneDate?`<span class="issue-meta">Done ${a.doneDate}</span>`:''}
         ${a.meetingId?`<span class="issue-meta">From ${esc(a.meetingId)}</span>`:''}
       </div>
@@ -8042,17 +8047,136 @@ function actionItemRowHTML(a){
   </div>`;
 }
 
+/* ===================== ACTION ITEM LOG =====================
+   Greg: "Are the to dos archived somewhere with a timestamp of date created and
+   date completed to give me a running log for the job."
+   Both dates were already being recorded on every item — `createdDate` when it
+   is raised, `doneDate` when it is ticked — and nothing has ever been deleted.
+   What was missing was somewhere to SEE them: `createdDate` was written and
+   then never rendered anywhere, and the only view of closed items was the
+   trimmed list on the Action items section above.
+   This is that archive: every item ever raised on the job, open and closed, in
+   one dated table with the created / due / completed dates side by side, its
+   own filters, and a CSV export for closeout or for answering a GC who wants to
+   know what was chased and when.
+   Dates, not clock times, on purpose — this app is date-only throughout and
+   action items are not worth making the one exception. ---- */
+function actionItemLogFilters(jobId){
+  // Filters reset when you move to another job rather than silently carrying
+  // over and showing an empty table.
+  if(ui.aiLogJob !== jobId){
+    ui.aiLogJob = jobId; ui.aiLogStatus = ''; ui.aiLogOwner = ''; ui.aiLogSubject = '';
+  }
+  return { status: ui.aiLogStatus||'', owner: ui.aiLogOwner||'', subject: ui.aiLogSubject||'' };
+}
+function setActionItemLogFilter(key, value){
+  if(key==='status') ui.aiLogStatus = value;
+  if(key==='owner') ui.aiLogOwner = value;
+  if(key==='subject') ui.aiLogSubject = value;
+  render();
+}
+function actionItemLogRows(jobId){
+  const f = actionItemLogFilters(jobId);
+  let rows = actionItemsFor(jobId);
+  if(f.status==='open') rows = rows.filter(a=>a.status!==ACTION_ITEM_DONE);
+  if(f.status==='done') rows = rows.filter(a=>a.status===ACTION_ITEM_DONE);
+  if(f.owner==='__none') rows = rows.filter(a=>!a.ownerId);
+  else if(f.owner) rows = rows.filter(a=>a.ownerId===f.owner);
+  if(f.subject) rows = rows.filter(a=>actionItemSubject(a)===f.subject);
+  // Newest first by when it was raised — the item's own timeline anchor.
+  return rows.slice().sort((a,b)=>
+    (b.createdDate||'').localeCompare(a.createdDate||'') || String(b.id).localeCompare(String(a.id)));
+}
+function csvCell(v){
+  const s = (v===null || v===undefined) ? '' : String(v);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+}
+function exportActionItemsCsv(jobId){
+  const job = getJob(jobId);
+  const rows = actionItemLogRows(jobId);
+  const header = ['Job','Item ID','Subject','What needs to happen','Owner','Status','Created','Due','Completed','Created by','From meeting'];
+  const lines = [header.map(csvCell).join(',')].concat(rows.map(a=>[
+    job ? job.id : jobId, a.id, actionItemSubject(a), a.text,
+    actionItemOwnerName(a) || 'Unassigned',
+    a.status===ACTION_ITEM_DONE ? 'Completed' : 'Open',
+    a.createdDate||'', a.dueDate||'', a.doneDate||'',
+    a.createdBy||'', a.meetingId||''
+  ].map(csvCell).join(',')));
+  try{
+    // Same client-side Blob download downloadBackup() uses. ﻿ so Excel
+    // opens it as UTF-8 and doesn't mangle the em-dashes in item text.
+    const blob = new Blob(['﻿' + lines.join('\r\n')], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${job?job.id:jobId}-action-items-${todayStr()}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+  }catch(e){ console.error('action item CSV export failed', e); }
+}
+function renderActionItemLog(job){
+  const all = actionItemsFor(job.id);
+  const f = actionItemLogFilters(job.id);
+  const rows = actionItemLogRows(job.id);
+  const openCount = all.filter(a=>a.status!==ACTION_ITEM_DONE).length;
+  const doneCount = all.length - openCount;
+  const owners = Array.from(new Set(all.map(a=>a.ownerId).filter(Boolean)));
+  const ownerOpts = owners.map(id=>{
+    const m = state.team.find(x=>x.id===id);
+    return `<option value="${id}" ${f.owner===id?'selected':''}>${esc(m?m.name:id)}</option>`;
+  }).join('');
+  const body = rows.map(a=>{
+    const doneRow = a.status===ACTION_ITEM_DONE;
+    return `<tr class="${doneRow?'ail-done':''}">
+      <td data-label="Item"><span class="issue-meta">${esc(a.id)}</span></td>
+      <td data-label="Subject">${actionItemSubjectChipHTML(a)}</td>
+      <td data-label="What needs to happen">${esc(a.text)}</td>
+      <td data-label="Owner">${esc(actionItemOwnerName(a) || 'Unassigned')}</td>
+      <td data-label="Created">${esc(a.createdDate||'—')}</td>
+      <td data-label="Due">${esc(a.dueDate||'—')}</td>
+      <td data-label="Completed">${doneRow?esc(a.doneDate||'—'):'—'}</td>
+      <td data-label="Status">${doneRow?badge('Completed'):badge('Open')}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="panel-head" style="margin-top:0;"><h3>Action item log</h3>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <span class="issue-meta">${all.length} total · ${openCount} open · ${doneCount} completed</span>
+        <button class="btn sm secondary" ${all.length===0?'disabled':''} onclick="exportActionItemsCsv('${job.id}')">${icon('fileUpload')} Export CSV</button>
+      </div>
+    </div>
+    <div class="issue-meta" style="margin:-6px 0 12px;">Every action item ever raised on this job, open and closed, with the date it was created and the date it was completed. Nothing is removed from here when an item is ticked off.</div>
+    <div class="field-row three" style="margin-bottom:12px;">
+      <div class="field"><label>Status</label>
+        <select onchange="setActionItemLogFilter('status', this.value)">
+          <option value="" ${f.status===''?'selected':''}>All</option>
+          <option value="open" ${f.status==='open'?'selected':''}>Open only</option>
+          <option value="done" ${f.status==='done'?'selected':''}>Completed only</option>
+        </select></div>
+      <div class="field"><label>Owner</label>
+        <select onchange="setActionItemLogFilter('owner', this.value)">
+          <option value="" ${f.owner===''?'selected':''}>Anyone</option>
+          <option value="__none" ${f.owner==='__none'?'selected':''}>Unassigned</option>
+          ${ownerOpts}
+        </select></div>
+      <div class="field"><label>Subject</label>
+        <select onchange="setActionItemLogFilter('subject', this.value)">
+          <option value="" ${f.subject===''?'selected':''}>Any subject</option>
+          ${ACTION_ITEM_SUBJECTS.map(v=>`<option value="${esc(v)}" ${f.subject===v?'selected':''}>${esc(v)}</option>`).join('')}
+        </select></div>
+    </div>
+    ${all.length===0
+      ? emptyBlock('clipboardList','No action items raised on this job yet.')
+      : (rows.length===0
+        ? `<div class="issue-meta" style="padding:6px 0;">Nothing matches this filter.</div>`
+        : `<div style="overflow-x:auto;"><table class="li-table ail-table">
+            <thead><tr><th>Item</th><th>Subject</th><th>What needs to happen</th><th>Owner</th><th>Created</th><th>Due</th><th>Completed</th><th>Status</th></tr></thead>
+            <tbody>${body}</tbody>
+          </table></div>`)}`;
+}
 function renderActionItemsSection(job){
   const all = actionItemsFor(job.id);
   const open = all.filter(a=>a.status!==ACTION_ITEM_DONE)
     .sort((a,b)=>(a.dueDate||'9999-99-99').localeCompare(b.dueDate||'9999-99-99'));
-  const doneAll = all.filter(a=>a.status===ACTION_ITEM_DONE)
-    .sort((a,b)=>(b.doneDate||'').localeCompare(a.doneDate||''));
-  // Nothing is ever dropped — the full history stays one click away. Only the
-  // default view is trimmed so a job with 200 closed items doesn't bury the
-  // open ones.
-  const showAllDone = ui.aiShowAllDone===job.id;
-  const done = showAllDone ? doneAll : doneAll.slice(0,10);
+  const doneAll = all.filter(a=>a.status===ACTION_ITEM_DONE);
   const overdue = open.filter(actionItemIsOverdue).length;
   return `<div class="section" style="margin-bottom:24px;">
     <div class="panel-head"><h3>Action items</h3>
@@ -8067,7 +8191,7 @@ function renderActionItemsSection(job){
       <button class="btn safety" onclick="submitActionItem('${job.id}')">${icon('plus')} Add</button>
     </div>`}
     ${open.length ? open.map(actionItemRowHTML).join('') : `<div class="issue-meta" style="padding:4px 0;">Nothing open right now.</div>`}
-    ${doneAll.length ? `<div class="section-title" style="margin-top:16px;">Completed (${doneAll.length})</div>${done.map(actionItemRowHTML).join('')}${doneAll.length>10?`<div style="margin-top:8px;"><button class="btn sm secondary" onclick="toggleActionItemDoneLog('${job.id}')">${showAllDone?'Show only the last 10':`Show all ${doneAll.length} completed`}</button></div>`:''}` : ''}
+    ${doneAll.length ? `<div class="issue-meta" style="margin-top:12px; padding-top:10px; border-top:1px solid var(--line);">${doneAll.length} completed — the full history, with the date each one was created and closed, is in the <b>Action item log</b> at the bottom of this tab.</div>` : ''}
   </div>`;
 }
 // Idempotent, exactly like the Schedule-task version this replaced (and like
