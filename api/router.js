@@ -24,6 +24,7 @@ const webpush = require('../lib/webpush');
 const { geocodeAddress } = require('../lib/geocode');
 const { postToTeamsWebhook } = require('../lib/teamsWebhook');
 const blob = require('../lib/blob');
+const raken = require('../lib/raken');
 
 const MAX_BODY_BYTES = 20 * 1024 * 1024; // 20MB — matches the app's own MAX_STATE_BYTES headroom
 
@@ -365,6 +366,143 @@ module.exports = async (req, res) => {
       } catch (e) {
         console.error('blob sign-reads failed', e);
         return sendJSON(res, 502, { error: 'blob_unavailable' });
+      }
+    }
+
+    // ---- Raken connection. See lib/raken.js for the security shape; the
+    // short version is that the client secret never leaves this server and
+    // Greg's Raken sign-in happens on Raken's own page.
+    //
+    // Connecting is App Manager only — it binds the whole deployment to one
+    // Raken account, which is not a thing any signed-in person should be able
+    // to do or undo. Reading is open to any signed-in user, because the point
+    // is for PMs to pull documents onto their jobs. ----
+    async function requireAppManager(req2) {
+      const identity0 = await store.getSession(getBearerToken(req2));
+      if (!identity0) return { error: 401, body: { error: 'not_authenticated' } };
+      const doc0 = await store.readState();
+      const who = resolveIdentity(identity0, doc0.state);
+      if (!who || who.role !== 'App Manager') {
+        return { error: 403, body: { error: 'forbidden', message: 'Only an App Manager can change the Raken connection.' } };
+      }
+      return { who };
+    }
+
+    if (url === '/api/raken/status' && req.method === 'GET') {
+      if (!(await store.getSession(getBearerToken(req)))) return sendJSON(res, 401, { error: 'not_authenticated' });
+      const tokens = raken.isConfigured() ? await store.loadRakenTokens() : null;
+      return sendJSON(res, 200, {
+        configured: raken.isConfigured(),
+        connected: !!(tokens && tokens.refreshToken),
+        connectedAt: (tokens && tokens.connectedAt) || null,
+        connectedBy: (tokens && tokens.connectedBy) || null,
+        redirectUri: raken.isConfigured() ? raken.redirectUri(req) : null
+      });
+    }
+
+    // Returns the URL to open, rather than redirecting: a browser navigation
+    // can't carry the bearer token, and putting a session token in a query
+    // string to work around that would be worse than the problem. This is an
+    // authenticated POST that hands back a URL and sets the CSRF cookie the
+    // callback will check.
+    if (url === '/api/raken/connect-url' && req.method === 'POST') {
+      const gate = await requireAppManager(req);
+      if (gate.error) return sendJSON(res, gate.error, gate.body);
+      if (!raken.isConfigured()) {
+        return sendJSON(res, 503, {
+          error: 'raken_not_configured',
+          message: 'Set RAKEN_CLIENT_ID and RAKEN_CLIENT_SECRET in the Vercel project settings first.'
+        });
+      }
+      const state = crypto.randomBytes(16).toString('hex');
+      auth.setCookie(res, 'nucleus_raken_state', JSON.stringify({ state, email: gate.who.email }), { maxAgeSeconds: 600 });
+      return sendJSON(res, 200, { authorizeUrl: raken.buildAuthorizeUrl(req, state) });
+    }
+
+    if (url === '/auth/raken/callback' && req.method === 'GET') {
+      // Tagged with source:'raken' because the Microsoft 365 sign-in popup
+      // posts to the same window with a {token}/{error} shape — an untagged
+      // payload would be ambiguous to whichever listener saw it first.
+      function sendRakenResult(payload) {
+        payload = Object.assign({ source: 'raken' }, payload);
+        const html = `<!doctype html><html><head><meta charset="utf-8"><title>Raken</title></head><body>
+<script>
+(function(){
+  var payload = ${JSON.stringify(payload)};
+  try {
+    if (window.opener) { window.opener.postMessage(payload, window.location.origin); window.close(); }
+    else { document.body.textContent = payload.ok ? 'Raken connected — you can close this window.' : (payload.error || 'Raken connection failed.'); }
+  } catch (e) { document.body.textContent = 'Raken connected. Close this window and reload Nucleus.'; }
+})();
+</script>
+<p>Finishing up…</p>
+</body></html>`;
+        res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }, SECURITY_HEADERS));
+        res.end(html);
+      }
+
+      const reqUrl = new URL(req.url, 'https://internal');
+      const code = reqUrl.searchParams.get('code');
+      const returnedState = reqUrl.searchParams.get('state');
+      const cookies = auth.parseCookies(req);
+      auth.clearCookie(res, 'nucleus_raken_state');
+      let pending = null;
+      try { pending = JSON.parse(cookies['nucleus_raken_state'] || 'null'); } catch (e) { pending = null; }
+
+      // Raken does not enforce redirect-URI validation, so this cookie check
+      // is the thing standing between us and someone else's authorization
+      // code being planted here. No cookie, no connection.
+      if (!pending || !pending.state) {
+        return sendRakenResult({ ok: false, error: 'This sign-in took too long or was started somewhere else. Try Connect again.' });
+      }
+      if (returnedState && returnedState !== pending.state) {
+        return sendRakenResult({ ok: false, error: 'Raken sent back a mismatched sign-in. Nothing was connected — try Connect again.' });
+      }
+      if (!code) {
+        return sendRakenResult({ ok: false, error: reqUrl.searchParams.get('error_description') || 'Raken did not return an authorization code.' });
+      }
+      try {
+        const tokens = await raken.exchangeCode(req, code);
+        await store.saveRakenTokens(Object.assign({}, tokens, {
+          connectedAt: new Date().toISOString(),
+          connectedBy: pending.email || null
+        }));
+        return sendRakenResult({ ok: true });
+      } catch (e) {
+        console.error('Raken token exchange failed', e);
+        return sendRakenResult({ ok: false, error: 'Raken refused the connection. Check the client ID and secret, and that the redirect URI on the Raken app matches this site.' });
+      }
+    }
+
+    if (url === '/api/raken/disconnect' && req.method === 'POST') {
+      const gate = await requireAppManager(req);
+      if (gate.error) return sendJSON(res, gate.error, gate.body);
+      await store.clearRakenTokens();
+      return sendJSON(res, 200, { ok: true });
+    }
+
+    // Read-only passthrough, restricted to the four collections this feature
+    // uses. An open proxy onto someone's construction-management account is
+    // not something to leave lying around, so the allowlist is a prefix match
+    // on a fixed list rather than anything clever.
+    if (url === '/api/raken/get' && req.method === 'GET') {
+      if (!(await store.getSession(getBearerToken(req)))) return sendJSON(res, 401, { error: 'not_authenticated' });
+      if (!raken.isConfigured()) return sendJSON(res, 503, { error: 'raken_not_configured' });
+      const q = new URL(req.url, 'https://internal').searchParams;
+      const path = q.get('path') || '';
+      const allowed = ['/projects', '/dailyReports', '/checklists', '/observations'];
+      if (!allowed.some((a) => path === a || path.startsWith(a + '/') || path.startsWith(a + '?'))) {
+        return sendJSON(res, 400, { error: 'path_not_allowed', allowed });
+      }
+      const params = {};
+      q.forEach((v, k) => { if (k !== 'path') params[k] = v; });
+      try {
+        const data = await raken.apiGet(store, path, params);
+        return sendJSON(res, 200, data);
+      } catch (e) {
+        if (e.code === 'not_connected') return sendJSON(res, 409, { error: 'raken_not_connected' });
+        console.error('Raken API call failed', e);
+        return sendJSON(res, 502, { error: 'raken_error', message: e.message });
       }
     }
 
