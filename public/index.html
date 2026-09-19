@@ -10358,7 +10358,12 @@ async function openAttachmentViewer(att){
       docViewer.pdf = await pdfjsLib.getDocument({data: bytes.slice()}).promise;
       if(!docViewer) return;
       docViewer.kind = 'pdf';
-      if(body) body.innerHTML = '<canvas id="dv-canvas"></canvas>';
+      // The canvas is built detached and only swapped in once the first page
+      // has actually drawn. A full-size elevation sheet takes a couple of
+      // seconds to rasterise, and an empty white canvas sitting there in the
+      // meantime looks like a broken file rather than a loading one.
+      docViewer.canvas = document.createElement('canvas');
+      docViewer.canvas.id = 'dv-canvas';
       await renderDocViewerPage();
       return;
     }catch(e){
@@ -10384,7 +10389,7 @@ async function openAttachmentViewer(att){
 async function renderDocViewerPage(){
   const v = docViewer;
   if(!v || !v.pdf) return;
-  const canvas = document.getElementById('dv-canvas');
+  const canvas = v.canvas;
   const body = document.getElementById('dv-body');
   if(!canvas) return;
   let page;
@@ -10408,8 +10413,13 @@ async function renderDocViewerPage(){
   if(v.renderTask){ try{ v.renderTask.cancel(); }catch(e){} }
   v.renderTask = page.render({canvasContext: canvas.getContext('2d'), viewport});
   try{ await v.renderTask.promise; }
-  catch(e){ /* cancelled by a newer render — expected */ }
-  if(docViewer === v) v.renderTask = null;
+  catch(e){ /* cancelled by a newer render — expected */ return; }
+  if(docViewer !== v) return;
+  v.renderTask = null;
+  if(body && !body.contains(canvas)){
+    body.innerHTML = '';
+    body.appendChild(canvas);
+  }
   updateDocViewerTools();
 }
 
