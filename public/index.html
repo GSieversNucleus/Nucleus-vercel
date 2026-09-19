@@ -1981,7 +1981,12 @@ function migrateProjectedCosts(){
       if(j){
         j.contractDocs = j.contractDocs || [];
         entry.attachments.forEach(a=>{
-          j.contractDocs.push({ name: a.name, dataUrl: a.dataUrl, docType: 'Green Sheet', uploadedBy: '', uploadedDate: todayStr() });
+          // Carries whichever storage shape the attachment already has —
+          // `dataUrl` for a legacy inline one, `pathname`/`type` for a
+          // Blob-backed one. Copying the descriptor keeps both working, and
+          // two documents pointing at one blob is harmless (nothing deletes a
+          // blob except removing the attachment that owns it).
+          j.contractDocs.push(Object.assign({}, a, { docType: 'Green Sheet', uploadedBy: '', uploadedDate: todayStr() }));
         });
       }
     }
@@ -2058,6 +2063,9 @@ function storageRefused(label){
     + fmtStorage(storageFreeBytes()) + " of room left. Try a smaller or flattened file, or remove an attachment you no longer need.");
 }
 // Fires once per session as the limit gets close, so it isn't a surprise.
+// With Blob storage active (see below) attachments no longer count toward
+// this at all, so in practice this now only fires on a job with a genuinely
+// enormous amount of typed-in data, or on the inline fallback path.
 let storageWarned = false;
 function checkStorageHeadroom(){
   if(storageWarned) return;
@@ -2066,6 +2074,261 @@ function checkStorageHeadroom(){
     showStorageNotice('Storage is getting full — ' + fmtStorage(storageFreeBytes())
       + " of room left before saving stops working. Attachments (photos and PDFs) are what fill it up.");
   }
+}
+
+/* ===================== ATTACHMENTS (Vercel Blob) =====================
+   Attachments used to be inlined into the state document as base64
+   `dataUrl` strings. Because doPersist() POSTs the WHOLE document on every
+   save, and Vercel rejects a request body over ~4.5MB with a 413 before any
+   app code runs, that made the 4.5MB cap a hard ceiling on every photo and
+   PDF in the app COMBINED — attaching ~5MB of elevation sheets broke saving
+   until they were removed. See lib/blob.js for the measurements.
+
+   Files now go straight from this browser to a private Vercel Blob store
+   and never pass through a function, so that cap no longer applies to them.
+   The state document keeps only a descriptor:
+
+       { name, size, type, pathname }   <- new
+       { name, size, dataUrl }          <- legacy
+
+   BOTH SHAPES MUST KEEP WORKING, FOREVER. Every attachment Greg has already
+   uploaded is the legacy shape, and nothing migrates them. attUrl() is the
+   one place that knows the difference; every render site goes through it.
+
+   The store is private, so a pathname is not directly fetchable. The server
+   mints short-lived presigned GET URLs in batches, which this caches and
+   drops straight into <img src> / <a href>. ==================== */
+const BLOB_MAX_FILE_BYTES = 50 * 1024 * 1024;
+// 1x1 transparent GIF — stands in for an <img> for the fraction of a second
+// between first paint and the signed URL arriving, so there's no broken-image
+// icon flash.
+const BLOB_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+// null until probed. false means the store isn't connected (a local run, or
+// the connection removed) and every upload silently falls back to the old
+// inline path, exactly as the app behaved before this change.
+let blobEnabled = null;
+let blobProbePromise = null;
+// pathname -> { url, expires }. An empty url is a NEGATIVE cache entry (the
+// blob is gone, or signing failed) and is deliberately kept for a short while
+// so a missing file can't spin the resolver.
+const blobUrlCache = Object.create(null);
+let blobPending = [];
+let blobResolveTimer = null;
+
+function blobProbe(){
+  if(blobProbePromise) return blobProbePromise;
+  blobProbePromise = (async function(){
+    try{
+      const res = await authFetch('/api/blob/status', {cache:'no-store'});
+      if(!res.ok) throw new Error('status ' + res.status);
+      const data = await res.json();
+      blobEnabled = !!(data && data.enabled);
+    }catch(e){ blobEnabled = false; }
+    return blobEnabled;
+  })();
+  return blobProbePromise;
+}
+
+/* The single source of truth for "where do I point at this attachment".
+   Returns '' while a signed URL is still being fetched; callers that need an
+   <img src> use attImgSrc() instead so they get the placeholder. */
+function attUrl(a){
+  if(!a) return '';
+  if(a.dataUrl) return a.dataUrl;            // legacy, and always instant
+  const p = a.pathname;
+  if(!p) return '';
+  const hit = blobUrlCache[p];
+  if(hit && hit.expires > Date.now()) return hit.url;
+  queueBlobResolve(p);
+  return '';
+}
+function attImgSrc(a){ return attUrl(a) || BLOB_PLACEHOLDER; }
+// For onclick="showLightbox('...')" — a signed URL has no single quotes, but
+// the legacy dataUrl path escaped them and there's no reason to stop.
+function attUrlJs(a){ return String(attUrl(a) || '').replace(/'/g, "\\'"); }
+function attHasSource(a){ return !!(a && (a.dataUrl || a.pathname)); }
+
+function queueBlobResolve(pathname){
+  if(blobPending.indexOf(pathname) !== -1) return;
+  blobPending.push(pathname);
+  clearTimeout(blobResolveTimer);
+  // One render pass queues every attachment on screen; this collapses them
+  // into a single request.
+  blobResolveTimer = setTimeout(flushBlobResolve, 30);
+}
+
+async function flushBlobResolve(){
+  if(!blobPending.length) return;
+  const batch = blobPending.slice(0, 200);
+  blobPending = blobPending.slice(200);
+  let resolved = 0;
+  try{
+    const res = await authFetch('/api/blob/sign-reads', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({pathnames: batch})
+    });
+    if(!res.ok) throw new Error('sign-reads ' + res.status);
+    const data = await res.json();
+    // Expire our copy a few minutes before the signature actually does, so a
+    // URL can never go stale while it's sitting in the DOM.
+    const expires = Math.max(Date.now() + 60000, (data.expiresAt || 0) - 5*60*1000);
+    batch.forEach(function(p){
+      if(data.urls && data.urls[p]){ blobUrlCache[p] = {url:data.urls[p], expires:expires}; resolved++; }
+      else blobUrlCache[p] = {url:'', expires: Date.now() + 60000};
+    });
+  }catch(e){
+    console.warn('Could not sign attachment URLs:', e);
+    batch.forEach(function(p){ blobUrlCache[p] = {url:'', expires: Date.now() + 15000}; });
+  }
+  // Only re-render when something actually became viewable — a page full of
+  // missing blobs must not loop.
+  if(resolved) render();
+  if(blobPending.length){
+    clearTimeout(blobResolveTimer);
+    blobResolveTimer = setTimeout(flushBlobResolve, 30);
+  }
+}
+
+async function dataUrlToBlob(dataUrl){ return await (await fetch(dataUrl)).blob(); }
+
+/* The awaitable sibling of attUrl(), for the handful of places that need an
+   attachment's bytes rather than something to put in the DOM — the welding
+   zip export, the spec PDF scanner, the Green Sheet re-parse. Resolves a
+   signed URL on the spot instead of returning '' and waiting for a re-render. */
+async function attUrlAsync(a){
+  if(!a) return '';
+  if(a.dataUrl) return a.dataUrl;
+  if(!a.pathname) return '';
+  const ready = attUrl(a);
+  if(ready) return ready;
+  try{
+    const res = await authFetch('/api/blob/sign-reads', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({pathnames:[a.pathname]})
+    });
+    if(!res.ok) return '';
+    const data = await res.json();
+    const url = (data.urls && data.urls[a.pathname]) || '';
+    if(url){
+      blobUrlCache[a.pathname] = {url: url, expires: Math.max(Date.now() + 60000, (data.expiresAt || 0) - 5*60*1000)};
+    }
+    return url;
+  }catch(e){ return ''; }
+}
+async function attBytes(a){
+  const url = await attUrlAsync(a);
+  if(!url) return null;
+  try{
+    const resp = await fetch(url);
+    if(!resp.ok) return null;
+    return new Uint8Array(await resp.arrayBuffer());
+  }catch(e){ return null; }
+}
+
+/* Uploads one file straight to the Blob store.
+   Returns a descriptor on success, or null to mean "couldn't — use the old
+   inline path", which is what keeps this change safe: if the store is
+   unreachable the app behaves exactly as it did before. */
+async function uploadToBlob(body, name, type){
+  if(!(await blobProbe())) return null;
+  try{
+    const signRes = await authFetch('/api/blob/sign-upload', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name: name, size: body.size})
+    });
+    if(!signRes.ok) throw new Error('sign-upload ' + signRes.status);
+    const signed = await signRes.json();
+    const putRes = await fetch(signed.uploadUrl, {
+      method:'PUT',
+      headers: type ? {'Content-Type': type} : {},
+      body: body
+    });
+    if(!putRes.ok) throw new Error('upload ' + putRes.status);
+    const att = {name: name, size: body.size, pathname: signed.pathname};
+    if(type) att.type = type;
+    return att;
+  }catch(e){
+    console.warn('Blob upload failed, falling back to inline storage:', e);
+    return null;
+  }
+}
+
+/* THE one function every upload site calls. Turns a File into an attachment
+   descriptor, choosing Blob storage when it's available and the old inline
+   path when it isn't, and reporting a refusal to the user itself.
+
+   Returns null when the file could not be added (the user has already been
+   told why), so callers only need `if(!att) continue;`.
+
+   opts.image  — run it through compressImageFile first (a field photo).
+   opts.pending — bytes already queued in this same batch but not yet
+                  committed to state, so the inline headroom check accounts
+                  for them. Ignored on the Blob path, where it's irrelevant. */
+async function makeAttachment(file, opts){
+  opts = opts || {};
+  const isImg = !!opts.image && /^image\//.test(file.type || '');
+  if(file.size > BLOB_MAX_FILE_BYTES){
+    showStorageNotice('"' + file.name + '" is ' + fmtStorage(file.size)
+      + ' — past the ' + fmtStorage(BLOB_MAX_FILE_BYTES) + ' limit for a single file.');
+    return null;
+  }
+  if(await blobProbe()){
+    // Photos are still resized, but far less aggressively than when every
+    // byte came out of a 4.5MB budget — 1600px/0.8 instead of 900px/0.62,
+    // which is a visible difference on a tablet held up to a mullion.
+    let body = file, type = file.type || '';
+    if(isImg){
+      try{
+        const dataUrl = await compressImageFile(file, 1600, 0.8);
+        body = await dataUrlToBlob(dataUrl);
+        type = 'image/jpeg';
+      }catch(e){ body = file; type = file.type || ''; }
+    }
+    const att = await uploadToBlob(body, file.name, type);
+    if(att) return att;
+  }
+  // ---- Fallback: inline into the state document (pre-Blob behaviour) ----
+  let dataUrl;
+  try{ dataUrl = isImg ? await compressImageFile(file) : await readFileAsDataURL(file); }
+  catch(e){ showStorageNotice('"' + file.name + '" could not be read.'); return null; }
+  if(stateBytes(state) + (opts.pending || 0) + dataUrl.length > MAX_STATE_BYTES){
+    storageRefused(file.name);
+    return null;
+  }
+  return {name: file.name, dataUrl: dataUrl, size: isImg ? dataUrl.length : file.size};
+}
+
+// How much of this batch is still only in memory — used for opts.pending on
+// the inline path. Blob-backed entries contribute nothing.
+function pendingInlineBytes(list){
+  return (list || []).reduce(function(n, a){ return n + ((a && a.dataUrl) ? a.dataUrl.length : 0); }, 0);
+}
+
+/* Best-effort cleanup when an attachment is removed.
+
+   DELIBERATELY NOT WIRED UP YET. Deleting on removal needs reference counting
+   first: importing a Green Sheet copies its attachment descriptor into the
+   job's documents, so two entries can point at one blob, and deleting the
+   blob when either is removed would silently break the other. An orphaned
+   blob costs a fraction of a cent; a job document that stops opening costs
+   Greg a phone call. The server route exists and this is correct for the
+   single-reference case — it gets called once removal knows about sharing. */
+function releaseAttachments(list){
+  const pathnames = (Array.isArray(list) ? list : [list])
+    .map(function(a){ return a && a.pathname; })
+    .filter(Boolean);
+  if(!pathnames.length) return;
+  try{
+    authFetch('/api/blob/delete', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({pathnames: pathnames})
+    }).catch(function(){});
+  }catch(e){}
 }
 
 /* ===================== AUTH (shared team passcode, optional Microsoft 365 SSO) =====================
@@ -3545,7 +3808,7 @@ function standardDetailHTML(s){
     ${s.description?`<div class="log-entry" style="margin-bottom:14px;">${esc(s.description)}</div>`:''}
     <div class="field"><label>Documents</label>
       <div id="std-detail-attach-list">${(s.attachments&&s.attachments.length) ? s.attachments.map((a,i)=>`
-        <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+        <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
         <button type="button" class="attach-remove" onclick="removeStandardAttachment(event, ${i})" aria-label="Remove attachment">&times;</button></div>`).join('') : `<div class="issue-meta">No documents attached.</div>`}</div>
       ${readOnly ? '' : `<div class="photo-drop" onclick="document.getElementById('std-detail-doc-input').click()" style="margin-top:8px;">${icon('fileUpload')}Attach the standard document</div>
       <input type="file" id="std-detail-doc-input" multiple style="display:none;">`}
@@ -3560,12 +3823,9 @@ async function handleStandardDocSelect(e, id){
   const files = Array.from(e.target.files);
   const newAttachments = [];
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   e.target.value = '';
   if(newAttachments.length){
@@ -4069,7 +4329,7 @@ function safetyDocDetailHTML(s){
     ${s.description?`<div class="log-entry" style="margin-bottom:14px;">${esc(s.description)}</div>`:''}
     <div class="field"><label>Documents</label>
       <div id="safe-detail-attach-list">${(s.attachments&&s.attachments.length) ? s.attachments.map((a,i)=>`
-        <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+        <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
         <button type="button" class="attach-remove" onclick="removeSafetyDocAttachment(event, ${i})" aria-label="Remove attachment">&times;</button></div>`).join('') : `<div class="issue-meta">No documents attached.</div>`}</div>
       ${readOnly ? '' : `<div class="photo-drop" onclick="document.getElementById('safe-detail-doc-input').click()" style="margin-top:8px;">${icon('fileUpload')}Attach the safety document</div>
       <input type="file" id="safe-detail-doc-input" multiple style="display:none;">`}
@@ -4092,12 +4352,9 @@ async function handleSafetyDocSelect(e, id){
   const files = Array.from(e.target.files);
   const newAttachments = [];
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   e.target.value = '';
   if(newAttachments.length){
@@ -4299,7 +4556,7 @@ function weldingDetailHTML(w){
     </div>
     <div class="field"><label>Documents</label>
       <div id="wps-detail-attach-list">${(w.attachments&&w.attachments.length) ? w.attachments.map((a,i)=>`
-        <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+        <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
         <button type="button" class="attach-remove" onclick="removeWeldingAttachment(event, ${i})" aria-label="Remove attachment">&times;</button></div>`).join('') : `<div class="issue-meta">No documents attached.</div>`}</div>
       ${readOnly ? '' : `<div class="photo-drop" onclick="document.getElementById('wps-detail-doc-input').click()" style="margin-top:8px;">${icon('fileUpload')}Attach the WPS/PQR document</div>
       <input type="file" id="wps-detail-doc-input" multiple style="display:none;">`}
@@ -4322,12 +4579,9 @@ async function handleWeldingDocSelect(e, id){
   const files = Array.from(e.target.files);
   const newAttachments = [];
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   e.target.value = '';
   if(newAttachments.length){
@@ -4368,7 +4622,7 @@ async function downloadWeldingSelected(mode){
       for(const a of (w.attachments||[])){
         any = true;
         const link = document.createElement('a');
-        link.href = a.dataUrl; link.download = a.name;
+        link.href = await attUrlAsync(a); link.download = a.name;
         document.body.appendChild(link); link.click(); link.remove();
         await new Promise(r=>setTimeout(r, 250));
       }
@@ -4380,21 +4634,30 @@ async function downloadWeldingSelected(mode){
   const zip = new JSZip();
   const manifestLines = [`Welding Procedures package — ${todayStr()}`, ''];
   let fileCount = 0;
-  items.forEach(w=>{
+  // Awaited rather than forEach: a Blob-backed attachment's bytes have to be
+  // fetched, where a legacy inline one was already in memory. attBytes()
+  // handles both and returns null if a file can't be retrieved, which is
+  // noted in the manifest instead of silently producing a short zip.
+  for(const w of items){
     const folder = sanitizeWeldingFileName(`${w.wpsNumber||w.id}${w.category?' - '+w.category:''}`);
     manifestLines.push(`${w.wpsNumber||w.id} — ${w.category||'Uncategorized'}`);
     manifestLines.push(`  Process: ${w.process||'—'} | Base material: ${w.baseMaterial||'—'} | Thickness: ${w.thicknessRange||'—'} | Positions: ${(w.positions||[]).join(', ')||'—'}`);
     if(w.pqrNumber) manifestLines.push(`  PQR #: ${w.pqrNumber}`);
     if((w.attachments||[]).length){
-      w.attachments.forEach(a=>{
-        zip.file(`${folder}/${sanitizeWeldingFileName(a.name)}`, dataUrlToUint8Array(a.dataUrl));
-        fileCount++;
-      });
+      for(const a of w.attachments){
+        const bytes = await attBytes(a);
+        if(bytes){
+          zip.file(`${folder}/${sanitizeWeldingFileName(a.name)}`, bytes);
+          fileCount++;
+        } else {
+          manifestLines.push(`  (could not retrieve ${a.name})`);
+        }
+      }
     } else {
       manifestLines.push(`  (no document attached yet)`);
     }
     manifestLines.push('');
-  });
+  }
   zip.file('manifest.txt', manifestLines.join('\n'));
   const blob = await zip.generateAsync({type:'blob'});
   const url = URL.createObjectURL(blob);
@@ -4425,7 +4688,7 @@ function renderWaterTesting(job, tests, markups){
       <td data-label=""><button class="btn sm secondary" ${disabledAttr()} onclick="deleteWaterTest('${w.id}')">${icon('trash')}</button></td>
     </tr>`).join('');
   const markupRows = markups.map(m=>`
-    <div class="attach-chip"><a href="${m.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(m.name)}</a>
+    <div class="attach-chip"><a href="${attUrl(m)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(m.name)}</a>
     <span class="issue-meta">${m.uploadedDate||''}</span>
     ${readOnly ? '' : `<button type="button" class="attach-remove" onclick="deleteElevationMarkup('${m.id}')" aria-label="Remove">&times;</button>`}</div>`).join('');
   return `
@@ -4481,14 +4744,10 @@ async function handleElevationMarkupSelect(e, jobId){
   const newEntries = [];
   let n = state.elevationMarkups.filter(x=>x.jobId===jobId).length;
   for(const file of files){
-    const isImage = file.type.startsWith('image/');
-    const dataUrl = isImage ? await compressImageFile(file) : await readFileAsDataURL(file);
-    if(stateBytes(state) + newEntries.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
+    const att = await makeAttachment(file, {image: file.type.startsWith('image/'), pending: pendingInlineBytes(newEntries)});
+    if(!att) continue;
     n += 1;
-    newEntries.push({ id: `${jobId}-MKUP-${String(n).padStart(3,'0')}`, jobId, name: file.name, dataUrl, uploadedBy: currentUserName||'', uploadedDate: todayStr() });
+    newEntries.push(Object.assign({}, att, { id: `${jobId}-MKUP-${String(n).padStart(3,'0')}`, jobId, uploadedBy: currentUserName||'', uploadedDate: todayStr() }));
   }
   e.target.value = '';
   if(newEntries.length) commit({type:'addElevationMarkups', entries:newEntries});
@@ -5541,7 +5800,7 @@ async function scanSpecForSubmittals(specId){
   if(typeof pdfjsLib==='undefined'){ alert("Couldn't scan the PDF right now (this needs an internet connection to load the PDF reader) — add submittals manually below, or try again once you're back online."); return; }
   let text;
   try{
-    text = await extractPdfText(pdfAtt.dataUrl);
+    text = await extractPdfText(await attUrlAsync(pdfAtt));
   }catch(e){
     console.error('spec PDF scan failed', e);
     alert("Couldn't read that PDF (it may be a scanned image with no selectable text) — add submittals manually below.");
@@ -5761,7 +6020,7 @@ function renderSpecs(job, specs, submittals){
         </div>
       </div>
       <div style="margin:8px 0;">${atts.length===0 ? `<div class="issue-meta">No spec document uploaded — nothing to download or scan yet.</div>` : `<div class="attach-grid">${atts.map((a,i)=>`
-        <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener" download="${esc(a.name)}">${icon('fileTypePdf')} ${esc(a.name)}</a>
+        <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener" download="${esc(a.name)}">${icon('fileTypePdf')} ${esc(a.name)}</a>
         ${readOnly?'':`<button type="button" class="attach-remove" onclick="removeSpecAttachment('${sp.id}', ${i})" aria-label="Remove">&times;</button>`}</div>`).join('')}</div>`}</div>
       <div class="issue-meta" style="margin-top:10px; cursor:pointer; text-decoration:underline;" onclick="viewSubmittalsForSpec('${sp.id}')">${icon('fileText')} ${subCount} submittal${subCount===1?'':'s'} logged for this spec — view on the Submittals tab</div>
     </div>`;
@@ -6057,9 +6316,9 @@ function contractDocsListHTML(job, docType){
   if(docs.length===0) return `<div class="issue-meta">No ${docType.toLowerCase()} documents uploaded yet.</div>`;
   return `<div class="attach-grid">${docs.map(d=>{
     if(isImageAttachment(d)){
-      return `<div class="attach-photo"><img src="${d.dataUrl}" onclick="showLightbox('${d.dataUrl.replace(/'/g,"\\'")}')">${readOnly?'':`<button type="button" class="attach-remove photo" onclick="removeJobDoc('${job.id}', ${d.idx})" aria-label="Remove">&times;</button>`}</div>`;
+      return `<div class="attach-photo"><img src="${attImgSrc(d)}" onclick="showLightbox('${attUrlJs(d)}')">${readOnly?'':`<button type="button" class="attach-remove photo" onclick="removeJobDoc('${job.id}', ${d.idx})" aria-label="Remove">&times;</button>`}</div>`;
     }
-    return `<div class="attach-chip"><a href="${d.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(d.name)}</a>
+    return `<div class="attach-chip"><a href="${attUrl(d)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(d.name)}</a>
       ${readOnly?'':`<button type="button" class="attach-remove" onclick="removeJobDoc('${job.id}', ${d.idx})" aria-label="Remove">&times;</button>`}</div>`;
   }).join('')}</div>`;
 }
@@ -6227,12 +6486,12 @@ async function backfillGreenSheetLineDetail(jobId, docIdx){
   if(typeof XLSX==='undefined') return;
   const job = getJob(jobId);
   const doc = job && job.contractDocs && job.contractDocs[docIdx];
-  if(!doc || !doc.dataUrl) return;
+  if(!doc || !attHasSource(doc)) return;
   const lines = greenSheetDocLines(doc);
   if(lines.length===0 || lines.every(l=>l.materialLines!==undefined)) return;
   let wb;
   try{
-    const blob = await (await fetch(doc.dataUrl)).blob();
+    const blob = await (await fetch(await attUrlAsync(doc))).blob();
     const buf = await blob.arrayBuffer();
     wb = XLSX.read(buf, {type:'array'});
   }catch(e){
@@ -6424,7 +6683,7 @@ function renderBudgetCosts(job, greenSheets, invoices, greenSheetQuotes){
         <div class="photo-drop" onclick="document.getElementById('gsq-doc-input').click()">${icon('fileUpload')}Drop the quote PDF here, or tap to browse</div>
         <input type="file" id="gsq-doc-input" accept="application/pdf" multiple style="display:none;" onchange="handleQuoteDraftFileSelect(event)">
         <div id="gsq-doc-list" style="margin-top:8px;">${quoteDraftAttachments.length?quoteDraftAttachments.map((a,i)=>`
-          <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+          <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
           <button type="button" class="attach-remove" onclick="removeQuoteDraftAttachment(${i})" aria-label="Remove attachment">&times;</button></div>`).join(''):''}</div>
       </div>
       <button class="btn sm safety" onclick="submitGreenSheetQuote('${job.id}')">${icon('plus')} Add quote</button>
@@ -6613,13 +6872,9 @@ async function handleContractDocSelect(ev, jobId, docType){
   const files = Array.from(ev.target.files);
   const newDocs = [];
   for(const file of files){
-    const isImage = file.type.startsWith('image/');
-    const dataUrl = isImage ? await compressImageFile(file) : await readFileAsDataURL(file);
-    if(stateBytes(state) + newDocs.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    const doc = { name: file.name, dataUrl, docType, uploadedBy: currentUserName||'', uploadedDate: todayStr() };
+    const att = await makeAttachment(file, {image: file.type.startsWith('image/'), pending: pendingInlineBytes(newDocs)});
+    if(!att) continue;
+    const doc = Object.assign({}, att, { docType, uploadedBy: currentUserName||'', uploadedDate: todayStr() });
     if(docType==='Green Sheet' && isSpreadsheetFile(file)){
       Object.assign(doc, await parseGreenSheetWorkbook(file));
     }
@@ -6689,8 +6944,8 @@ function renderIssues(job, issues, isForeman){
     const docsHtml = (i.documents && i.documents.length) ? `
         <div class="attach-grid" style="margin-top:6px;">${i.documents.map(d=>
           isImageAttachment(d)
-            ? `<div class="attach-photo" style="width:44px;height:44px;"><img src="${d.dataUrl}" style="cursor:pointer;" onclick="event.stopPropagation(); showLightbox('${d.dataUrl.replace(/'/g,"\\'")}')"></div>`
-            : `<div class="attach-chip"><a href="${d.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(d.name)}</a></div>`
+            ? `<div class="attach-photo" style="width:44px;height:44px;"><img src="${attImgSrc(d)}" style="cursor:pointer;" onclick="event.stopPropagation(); showLightbox('${attUrlJs(d)}')"></div>`
+            : `<div class="attach-chip"><a href="${attUrl(d)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(d.name)}</a></div>`
         ).join('')}</div>` : '';
     let actionArea = '';
     if(isForeman){
@@ -6960,7 +7215,7 @@ function renderGanttLog(job, ganttLogs){
   const rows = sorted.map(g=>`
     <tr>
       <td data-label="Month">${g.month ? monthLabel(g.month) : '—'}</td>
-      <td data-label="File"><a href="${g.dataUrl}" target="_blank" rel="noopener">${icon(g.fileType==='application/pdf'?'fileTypePdf':'camera')} ${esc(g.fileName)}</a></td>
+      <td data-label="File"><a href="${attUrl(g)}" target="_blank" rel="noopener">${icon(g.fileType==='application/pdf'?'fileTypePdf':'camera')} ${esc(g.fileName)}</a></td>
       <td data-label="Uploaded by">${esc(g.uploadedBy||'—')}</td>
       <td data-label="Date">${g.uploadedDate||'—'}</td>
       <td data-label="">${readOnly?'':`<button type="button" class="attach-remove" onclick="deleteGanttLog('${g.id}')" aria-label="Remove">&times;</button>`}</td>
@@ -6987,18 +7242,13 @@ async function handleGanttFileSelect(e, jobId){
   const month = document.getElementById('gantt-month').value || currentMonthStr();
   const uploadedBy = document.getElementById('gantt-by').value.trim();
   rememberName(uploadedBy);
-  const isImage = file.type.startsWith('image/');
-  const dataUrl = isImage ? await compressImageFile(file) : await readFileAsDataURL(file);
-  if(stateBytes(state) + dataUrl.length > MAX_STATE_BYTES){
-    storageRefused('');
-    e.target.value = '';
-    return;
-  }
-  const entry = {
+  const att = await makeAttachment(file, {image: file.type.startsWith('image/')});
+  if(!att){ e.target.value = ''; return; }
+  const entry = Object.assign({}, att, {
     id: nextId('ganttLogs', jobId, 'GANTT'), jobId, month,
-    fileName: file.name, fileType: file.type, dataUrl,
+    fileName: file.name, fileType: file.type,
     uploadedBy, uploadedDate: todayStr()
-  };
+  });
   commit({type:'addGanttLog', entry});
 }
 function deleteGanttLog(id){
@@ -7693,9 +7943,9 @@ function renderTaskAttachGridHTML(list){
   if(!list || list.length===0) return `<div class="issue-meta">No documents or photos attached yet.</div>`;
   return `<div class="attach-grid">${list.map((a,i)=>{
     if(isImageAttachment(a)){
-      return `<div class="attach-photo"><img src="${a.dataUrl}" onclick="showLightbox('${a.dataUrl.replace(/'/g,"\\'")}')">${readOnly?'':`<button type="button" class="attach-remove photo" onclick="removeTaskAttachment(event, ${i})" aria-label="Remove photo">&times;</button>`}</div>`;
+      return `<div class="attach-photo"><img src="${attImgSrc(a)}" onclick="showLightbox('${attUrlJs(a)}')">${readOnly?'':`<button type="button" class="attach-remove photo" onclick="removeTaskAttachment(event, ${i})" aria-label="Remove photo">&times;</button>`}</div>`;
     }
-    return `<div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+    return `<div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
       ${readOnly?'':`<button type="button" class="attach-remove" onclick="removeTaskAttachment(event, ${i})" aria-label="Remove attachment">&times;</button>`}</div>`;
   }).join('')}</div>`;
 }
@@ -7704,12 +7954,9 @@ async function handleTaskPhotoSelect(ev, taskId){
   const newAttachments = [];
   for(const file of files){
     if(!file.type.startsWith('image/')) continue;
-    const dataUrl = await compressImageFile(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused('That photo');
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:dataUrl.length});
+    const att = await makeAttachment(file, {image:true, pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   ev.target.value = '';
   if(newAttachments.length){
@@ -7721,12 +7968,9 @@ async function handleTaskFileSelect(ev, taskId){
   const files = Array.from(ev.target.files);
   const newAttachments = [];
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   ev.target.value = '';
   if(newAttachments.length){
@@ -8266,25 +8510,42 @@ function convertMeetingItemToActionItem(mtgId, itemId){
 }
 /* ---- Requests: a PM-authored log of what was asked of the field, and its status.
    The request itself is emailed from a separate application — Nucleus just tracks it. ---- */
-function isImageAttachment(a){ return /^data:image\//.test((a && a.dataUrl) || ''); }
+/* Both attachment shapes: a legacy inline one declares its type in the data
+   URL prefix, a Blob-backed one carries it as `type`. Filename is the last
+   resort, for an old entry saved without either. */
+function attType(a){
+  if(!a) return '';
+  if(a.type) return String(a.type);
+  const m = /^data:([^;,]+)/.exec(a.dataUrl || '');
+  if(m) return m[1];
+  const name = String(a.name || a.fileName || '');
+  if(/\.pdf$/i.test(name)) return 'application/pdf';
+  if(/\.(png|jpe?g|gif|webp|heic|bmp)$/i.test(name)) return 'image/' + name.split('.').pop().toLowerCase();
+  return '';
+}
+function isImageAttachment(a){ return /^image\//.test(attType(a)); }
 // Used by the Specs card (renderSpecs) to decide whether "Scan for submittals" has
-// anything to work with — matches on the data URL's declared MIME type rather than
-// the filename, same reasoning as isImageAttachment above.
-function isPdfAttachment(a){ return /^data:application\/pdf/.test((a && a.dataUrl) || ''); }
-function compressImageFile(file){
+// anything to work with — matches on the declared MIME type rather than the
+// filename, same reasoning as isImageAttachment above.
+function isPdfAttachment(a){ return /^application\/pdf/.test(attType(a)); }
+/* maxW/quality default to the original values, which are what the inline
+   fallback still needs (every byte there comes out of the state document's
+   budget). makeAttachment() passes larger numbers on the Blob path. */
+function compressImageFile(file, maxW, quality){
+  maxW = maxW || 900;
+  quality = quality || 0.62;
   return new Promise((resolve, reject)=>{
     const reader = new FileReader();
     reader.onload = function(ev){
       const img = new Image();
       img.onload = function(){
-        const maxW = 900;
         const scale = Math.min(1, maxW / img.width);
         const canvas = document.createElement('canvas');
         canvas.width = img.width * scale;
         canvas.height = img.height * scale;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.62));
+        resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.onerror = reject;
       img.src = ev.target.result;
@@ -8409,9 +8670,9 @@ function renderEngAttachGridHTML(list){
   if(!list || list.length===0) return `<div class="issue-meta">No documents or photos attached yet.</div>`;
   return `<div class="attach-grid">${list.map((a,i)=>{
     if(isImageAttachment(a)){
-      return `<div class="attach-photo"><img src="${a.dataUrl}" onclick="showLightbox('${a.dataUrl.replace(/'/g,"\\'")}')">${readOnly?'':`<button type="button" class="attach-remove photo" onclick="removeEngineeringAttachment(event, ${i})" aria-label="Remove photo">&times;</button>`}</div>`;
+      return `<div class="attach-photo"><img src="${attImgSrc(a)}" onclick="showLightbox('${attUrlJs(a)}')">${readOnly?'':`<button type="button" class="attach-remove photo" onclick="removeEngineeringAttachment(event, ${i})" aria-label="Remove photo">&times;</button>`}</div>`;
     }
-    return `<div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+    return `<div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
       ${readOnly?'':`<button type="button" class="attach-remove" onclick="removeEngineeringAttachment(event, ${i})" aria-label="Remove attachment">&times;</button>`}</div>`;
   }).join('')}</div>`;
 }
@@ -8672,12 +8933,9 @@ async function handleEngineeringPhotoSelect(ev, engId){
   const newAttachments = [];
   for(const file of files){
     if(!file.type.startsWith('image/')) continue;
-    const dataUrl = await compressImageFile(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused('That photo');
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:dataUrl.length});
+    const att = await makeAttachment(file, {image:true, pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   ev.target.value = '';
   if(newAttachments.length){
@@ -8689,12 +8947,9 @@ async function handleEngineeringFileSelect(ev, engId){
   const files = Array.from(ev.target.files);
   const newAttachments = [];
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   ev.target.value = '';
   if(newAttachments.length){
@@ -8828,12 +9083,9 @@ async function handleUnitSheetSelect(event, elevId){
   const files = Array.from(event.target.files||[]);
   const picked = [];
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + picked.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    picked.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(picked)});
+    if(!att) continue;
+    picked.push(att);
   }
   event.target.value = '';
   if(picked.length){
@@ -8850,7 +9102,7 @@ function unitElevationSheetHTML(e){
   const chips = sheets.map((a,i)=>{
     const short = a.name.length>24 ? a.name.slice(0,22)+'…' : a.name;
     return `<span class="attach-chip ud-sheetchip">
-      <a href="${a.dataUrl}" target="_blank" rel="noopener" title="Open ${esc(a.name)}">${icon(isImageAttachment(a)?'camera':'fileTypePdf')} ${esc(short)}</a>
+      <a href="${attUrl(a)}" target="_blank" rel="noopener" title="Open ${esc(a.name)}">${icon(isImageAttachment(a)?'camera':'fileTypePdf')} ${esc(short)}</a>
       <button type="button" class="attach-remove" ${disabledAttr()} onclick="removeUnitSheet('${e.id}',${i})" aria-label="Remove ${esc(a.name)}">&times;</button>
     </span>`;
   }).join('');
@@ -9193,7 +9445,7 @@ function renderElevAttachGridHTML(list){
   const docs = (list||[]).map((a,i)=>({a,i})).filter(({a})=>!isImageAttachment(a));
   if(docs.length===0) return `<div class="issue-meta">No documents attached yet.</div>`;
   return `<div class="attach-grid">${docs.map(({a,i})=>`
-    <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+    <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
       ${readOnly?'':`<button type="button" class="attach-remove" onclick="removeElevationAttachment(event, ${i})" aria-label="Remove attachment">&times;</button>`}</div>`).join('')}</div>`;
 }
 // A dated before/after timeline for this elevation's progress photos —
@@ -9210,7 +9462,7 @@ function renderElevPhotoTimelineHTML(list){
   const sorted = photos.slice().sort((x,y)=>(x.a.date||'').localeCompare(y.a.date||''));
   return `<div class="elev-photo-timeline">${sorted.map(({a,i})=>`
     <div class="elev-photo-entry">
-      <div class="attach-photo"><img src="${a.dataUrl}" onclick="showLightbox('${a.dataUrl.replace(/'/g,"\\'")}')">${readOnly?'':`<button type="button" class="attach-remove photo" onclick="removeElevationAttachment(event, ${i})" aria-label="Remove photo">&times;</button>`}</div>
+      <div class="attach-photo"><img src="${attImgSrc(a)}" onclick="showLightbox('${attUrlJs(a)}')">${readOnly?'':`<button type="button" class="attach-remove photo" onclick="removeElevationAttachment(event, ${i})" aria-label="Remove photo">&times;</button>`}</div>
       ${readOnly
         ? `<div class="elev-photo-meta">${a.date?esc(a.date):'No date'}${a.caption?' — '+esc(a.caption):''}</div>`
         : `<input type="date" class="elev-photo-date-input" value="${a.date||''}" onchange="updateElevationAttachmentField(${i},'date',this.value)">
@@ -9253,16 +9505,13 @@ async function handleElevationPhotoSelect(e, elevId){
   const newAttachments = [];
   for(const file of files){
     if(!file.type.startsWith('image/')) continue;
-    const dataUrl = await compressImageFile(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused('That photo');
-      continue;
-    }
+    const att = await makeAttachment(file, {image:true, pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
     // date/caption make this a timeline entry, not just a flat attachment —
     // see renderElevPhotoTimelineHTML. The whole batch shares whatever date
     // was picked above (one shoot, one date) — each can still be corrected
     // individually afterward, and a caption added, right in the timeline.
-    newAttachments.push({name:file.name, dataUrl, size:dataUrl.length, date: photoDate, caption: ''});
+    newAttachments.push(Object.assign(att, {date: photoDate, caption: ''}));
   }
   e.target.value = '';
   if(newAttachments.length){
@@ -9274,12 +9523,9 @@ async function handleElevationFileSelect(e, elevId){
   const files = Array.from(e.target.files);
   const newAttachments = [];
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   e.target.value = '';
   if(newAttachments.length){
@@ -9670,7 +9916,7 @@ function dailyReportDetailHTML(d){
     ${d.notes?`<div class="log-entry" style="margin-bottom:14px; white-space:pre-wrap;">${esc(d.notes)}</div>`:''}
     <div class="field"><label>Documents / photos</label>
       <div id="dr-detail-attach-list">${(d.attachments&&d.attachments.length) ? d.attachments.map((a,i)=>`
-        <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+        <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
         <button type="button" class="attach-remove" onclick="removeDailyReportAttachment(event, ${i})" aria-label="Remove attachment">&times;</button></div>`).join('') : `<div class="issue-meta">No documents attached.</div>`}</div>
       ${readOnly ? '' : `<div class="photo-drop" onclick="document.getElementById('dr-detail-doc-input').click()" style="margin-top:8px;">${icon('fileUpload')}Attach a photo or PDF of the daily report</div>
       <input type="file" id="dr-detail-doc-input" multiple style="display:none;">`}
@@ -9693,12 +9939,9 @@ async function handleDailyReportDocSelect(e, id){
   const files = Array.from(e.target.files);
   const newAttachments = [];
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   e.target.value = '';
   if(newAttachments.length){
@@ -10875,13 +11118,9 @@ async function handlePdfSelect(e, listId){
   const files = Array.from(e.target.files);
   for(const file of files){
     if(file.type !== 'application/pdf') continue;
-    const dataUrl = await readFileAsDataURL(file);
-    const draftSize = draftAttachments.reduce((n,a)=>n+a.dataUrl.length,0);
-    if(stateBytes(state) + draftSize + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    draftAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(draftAttachments)});
+    if(!att) continue;
+    draftAttachments.push(att);
   }
   e.target.value = '';
   renderAttachList(listId, draftAttachments, true);
@@ -10889,13 +11128,9 @@ async function handlePdfSelect(e, listId){
 async function handleAnyFileSelect(e, listId){
   const files = Array.from(e.target.files);
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    const draftSize = draftAttachments.reduce((n,a)=>n+a.dataUrl.length,0);
-    if(stateBytes(state) + draftSize + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    draftAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(draftAttachments)});
+    if(!att) continue;
+    draftAttachments.push(att);
   }
   e.target.value = '';
   renderAttachList(listId, draftAttachments, true);
@@ -10905,7 +11140,7 @@ function renderAttachList(listId, list, isDraft){
   if(!el) return;
   if(!list || list.length===0){ el.innerHTML = `<div class="issue-meta">No backup documents attached.</div>`; return; }
   el.innerHTML = list.map((a,i)=>`
-    <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+    <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
     <button type="button" class="attach-remove" onclick="${isDraft?`removeDraftAttachment(${i}, '${listId}')`:`removeCOAttachment(event, ${i})`}" aria-label="Remove attachment">&times;</button></div>`).join('');
 }
 function removeDraftAttachment(i, listId){
@@ -10923,13 +11158,9 @@ let quoteDraftAttachments = [];
 async function handleQuoteDraftFileSelect(e){
   const files = Array.from(e.target.files);
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    const draftSize = quoteDraftAttachments.reduce((n,a)=>n+a.dataUrl.length,0);
-    if(stateBytes(state) + draftSize + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    quoteDraftAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(quoteDraftAttachments)});
+    if(!att) continue;
+    quoteDraftAttachments.push(att);
   }
   e.target.value = '';
   render();
@@ -11057,7 +11288,7 @@ function coDetailHTML(co){
     <div class="field"><label>Notes / RFI ref#</label><input id="co-detail-notes" ${disabledAttr()} value="${esc(co.notes||'')}" placeholder="e.g. See RFI-12" onchange="updateCOField('${co.id}','notes',this.value.trim()||null)"></div>
     <div class="field"><label>Backup documents (PDF)</label>
       <div id="co-detail-attach-list">${(co.attachments&&co.attachments.length) ? co.attachments.map((a,i)=>`
-        <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+        <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
         <button type="button" class="attach-remove" onclick="removeCOAttachment(event, ${i})" aria-label="Remove attachment">&times;</button></div>`).join('') : `<div class="issue-meta">No backup documents attached.</div>`}</div>
       ${readOnly ? '' : `<div class="photo-drop" onclick="document.getElementById('co-detail-pdf-input').click()" style="margin-top:8px;">${icon('fileUpload')}Attach a PDF backup document</div>
       <input type="file" id="co-detail-pdf-input" accept="application/pdf" multiple style="display:none;">`}
@@ -11103,12 +11334,9 @@ async function handleDetailPdfSelect(e, coId){
   const newAttachments = [];
   for(const file of files){
     if(file.type !== 'application/pdf') continue;
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   e.target.value = '';
   if(newAttachments.length){
@@ -11190,7 +11418,7 @@ function submittalDetailHTML(su){
     </div>
     <div class="field"><label>Attached documents</label>
       <div id="sub-detail-attach-list">${(su.attachments&&su.attachments.length) ? su.attachments.map((a,i)=>`
-        <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+        <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
         <button type="button" class="attach-remove" onclick="removeSubmittalAttachment(event, ${i})" aria-label="Remove attachment">&times;</button></div>`).join('') : `<div class="issue-meta">No documents attached.</div>`}</div>
       ${readOnly ? '' : `<div class="photo-drop" onclick="document.getElementById('sub-detail-doc-input').click()" style="margin-top:8px;">${icon('fileUpload')}Attach a document</div>
       <input type="file" id="sub-detail-doc-input" multiple style="display:none;">`}
@@ -11271,12 +11499,9 @@ async function handleSubmittalDocSelect(e, subId){
   const files = Array.from(e.target.files);
   const newAttachments = [];
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   e.target.value = '';
   if(newAttachments.length){
@@ -11323,7 +11548,7 @@ function invoiceDetailHTML(inv){
     </div>
     <div class="field"><label>Attached documents</label>
       <div id="inv-detail-attach-list">${(inv.attachments&&inv.attachments.length) ? inv.attachments.map((a,i)=>`
-        <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+        <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
         <button type="button" class="attach-remove" onclick="removeInvoiceAttachment(event, ${i})" aria-label="Remove attachment">&times;</button></div>`).join('') : `<div class="issue-meta">No documents attached.</div>`}</div>
       ${readOnly ? '' : `<div class="photo-drop" onclick="document.getElementById('inv-detail-doc-input').click()" style="margin-top:8px;">${icon('fileUpload')}Attach the invoice PDF</div>
       <input type="file" id="inv-detail-doc-input" accept="application/pdf" multiple style="display:none;">`}
@@ -11340,12 +11565,9 @@ async function handleInvoiceDocSelect(e, invId){
   const newAttachments = [];
   for(const file of files){
     if(file.type !== 'application/pdf') continue;
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   e.target.value = '';
   if(newAttachments.length){
@@ -11401,7 +11623,7 @@ function rfiDetailHTML(r){
     </div>
     <div class="field"><label>GC response document</label>
       <div id="rfi-detail-attach-list">${(r.attachments&&r.attachments.length) ? r.attachments.map((a,i)=>`
-        <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+        <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
         <button type="button" class="attach-remove" onclick="removeRfiAttachment(event, ${i})" aria-label="Remove attachment">&times;</button></div>`).join('') : `<div class="issue-meta">No documents attached.</div>`}</div>
       ${readOnly ? '' : `<div class="photo-drop" onclick="document.getElementById('rfi-detail-doc-input').click()" style="margin-top:8px;">${icon('fileUpload')}Attach the GC's returned RFI document</div>
       <input type="file" id="rfi-detail-doc-input" multiple style="display:none;">`}
@@ -11414,12 +11636,9 @@ async function handleRfiDocSelect(e, rfiId){
   const files = Array.from(e.target.files);
   const newAttachments = [];
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   e.target.value = '';
   if(newAttachments.length){
@@ -11460,7 +11679,7 @@ function gsQuoteDetailHTML(q){
     </div>
     <div class="field"><label>Quote document</label>
       <div id="gsq-detail-attach-list">${(q.attachments&&q.attachments.length) ? q.attachments.map((a,i)=>`
-        <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+        <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
         <button type="button" class="attach-remove" onclick="removeGSQuoteAttachment(event, ${i})" aria-label="Remove attachment">&times;</button></div>`).join('') : `<div class="issue-meta">No documents attached.</div>`}</div>
       ${readOnly ? '' : `<div class="photo-drop" onclick="document.getElementById('gsq-detail-doc-input').click()" style="margin-top:8px;">${icon('fileUpload')}Attach the quote document</div>
       <input type="file" id="gsq-detail-doc-input" multiple style="display:none;">`}
@@ -11475,12 +11694,9 @@ async function handleGSQuoteDocSelect(e, id){
   const files = Array.from(e.target.files);
   const newAttachments = [];
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   e.target.value = '';
   if(newAttachments.length){
@@ -11530,7 +11746,7 @@ function procurementDetailHTML(p){
     </div>
     <div class="field"><label>Order confirmation / quote / PO</label>
       <div id="proc-detail-attach-list">${(p.attachments&&p.attachments.length) ? p.attachments.map((a,i)=>`
-        <div class="attach-chip"><a href="${a.dataUrl}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
+        <div class="attach-chip"><a href="${attUrl(a)}" target="_blank" rel="noopener">${icon('fileTypePdf')} ${esc(a.name)}</a>
         <button type="button" class="attach-remove" onclick="removeProcurementAttachment(event, ${i})" aria-label="Remove attachment">&times;</button></div>`).join('') : `<div class="issue-meta">No documents attached.</div>`}</div>
       ${readOnly ? '' : `<div class="photo-drop" onclick="document.getElementById('proc-detail-doc-input').click()" style="margin-top:8px;">${icon('fileUpload')}Attach order confirmation, quote, or PO</div>
       <input type="file" id="proc-detail-doc-input" multiple style="display:none;">`}
@@ -11545,12 +11761,9 @@ async function handleProcurementDocSelect(e, id){
   const files = Array.from(e.target.files);
   const newAttachments = [];
   for(const file of files){
-    const dataUrl = await readFileAsDataURL(file);
-    if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      storageRefused(file.name);
-      continue;
-    }
-    newAttachments.push({name:file.name, dataUrl, size:file.size});
+    const att = await makeAttachment(file, {pending: pendingInlineBytes(newAttachments)});
+    if(!att) continue;
+    newAttachments.push(att);
   }
   e.target.value = '';
   if(newAttachments.length){
