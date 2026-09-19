@@ -882,6 +882,11 @@
 .ail-table td,.ail-table th{vertical-align:top}
 .ail-table tr.ail-done td{color:var(--text-muted)}
 .ail-table tr.ail-done td[data-label="What needs to happen"]{text-decoration:line-through}
+/* ---- Storage notice (never alert(); see showStorageNotice) ---- */
+.storage-notice{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:9999;max-width:620px;width:calc(100% - 32px);display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:10px;background:var(--ink);color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.28);font-size:13px;line-height:1.45}
+.storage-notice .sn-body{flex:1;min-width:0}
+.storage-notice .sn-x{flex:none;background:none;border:0;color:#fff;opacity:.7;font-size:19px;line-height:1;cursor:pointer;padding:0 2px}
+.storage-notice .sn-x:hover{opacity:1}
 </style>
 
 <div class="topbar">
@@ -1882,7 +1887,17 @@ const CONTACT_CATEGORIES = ['General Contractor','Supplier','Architect / Enginee
    Artifact runtime — GET/POST /data/state.json and /api/state, guarded by a
    bearer token from /api/login. See AUTH below for the sign-in gate. */
 const STATE_FILE = '/data/state.json';
-const MAX_STATE_BYTES = 15 * 1024 * 1024; // headroom under the server's 20MB request cap
+/* The real ceiling is NOT the server's own config — it's the platform's.
+   Vercel serverless functions reject a request body over ~4.5MB with a 413
+   before any of our code runs, and this app POSTs the ENTIRE state document on
+   every save. Measured against the live deployment: a 4.0MB body is accepted,
+   4.4MB is rejected. This was previously set to 15MB, which meant the app would
+   accept attachments it could never save and then sit in "Save failed —
+   retrying shortly" forever with no explanation. 3.8MB leaves margin under the
+   measured-good 4.0MB.
+   Raising this is not the fix — moving attachments out of the state document
+   is. Until then, treat this number as a hard platform limit. */
+const MAX_STATE_BYTES = Math.round(3.8 * 1024 * 1024);
 let saveTimer = null;
 let saveInFlight = false;
 let saveQueued = false;
@@ -2013,6 +2028,45 @@ function migrateWeldingLibrary(){
   return true;
 }
 function stateBytes(s){ return new Blob([JSON.stringify(s)]).size; }
+function fmtStorage(bytes){
+  if(bytes >= 1048576) return (bytes/1048576).toFixed(1) + ' MB';
+  return Math.max(0, Math.round(bytes/1024)) + ' KB';
+}
+function storageFreeBytes(){ return Math.max(0, MAX_STATE_BYTES - stateBytes(state)); }
+/* Refusals are shown as an in-page banner, never alert(). A blocking native
+   dialog has frozen a tab in this app before (see the schedule-import notes),
+   and freezing the tab is a spectacularly bad way to tell someone a file was
+   too big. */
+function showStorageNotice(msg){
+  let el = document.getElementById('storage-notice');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'storage-notice';
+    el.className = 'storage-notice';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = '<div class="sn-body"></div><button type="button" class="sn-x" aria-label="Dismiss">&times;</button>';
+  el.querySelector('.sn-body').textContent = msg;
+  el.querySelector('.sn-x').onclick = function(){ el.remove(); };
+  el.style.display = 'flex';
+  clearTimeout(window.__storageNoticeTimer);
+  window.__storageNoticeTimer = setTimeout(function(){ if(el) el.remove(); }, 15000);
+}
+function storageRefused(label){
+  const what = label ? '"' + label + '" ' : 'That file ';
+  showStorageNotice(what + "can't be added — it would take this job's saved data past what the server accepts, and saving would start failing. About "
+    + fmtStorage(storageFreeBytes()) + " of room left. Try a smaller or flattened file, or remove an attachment you no longer need.");
+}
+// Fires once per session as the limit gets close, so it isn't a surprise.
+let storageWarned = false;
+function checkStorageHeadroom(){
+  if(storageWarned) return;
+  if(stateBytes(state) > MAX_STATE_BYTES * 0.85){
+    storageWarned = true;
+    showStorageNotice('Storage is getting full — ' + fmtStorage(storageFreeBytes())
+      + " of room left before saving stops working. Attachments (photos and PDFs) are what fill it up.");
+  }
+}
 
 /* ===================== AUTH (shared team passcode, optional Microsoft 365 SSO) =====================
    Nucleus is gated behind one shared team passcode by default (NUCLEUS_PASSCODE
@@ -3140,6 +3194,8 @@ async function doPersist(){
   if(saveInFlight){ saveQueued = true; return; }
   if(stateBytes(state) > MAX_STATE_BYTES){
     setSavePill('error', 'Too much data to save — remove a large photo or PDF');
+    showStorageNotice("Saving is blocked: this job's data is " + fmtStorage(stateBytes(state))
+      + ', past the ' + fmtStorage(MAX_STATE_BYTES) + ' the server accepts. Remove a large photo or PDF attachment and it will save again.');
     return;
   }
   saveInFlight = true;
@@ -3177,6 +3233,7 @@ async function doPersist(){
     pendingQueue = [];
     persistQueue();
     setSavePill('saved', 'All changes saved');
+    checkStorageHeadroom();
   }catch(e){
     console.error('save failed', e);
     setSavePill('error', 'Save failed — retrying shortly');
@@ -3505,7 +3562,7 @@ async function handleStandardDocSelect(e, id){
   for(const file of files){
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this app's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -4037,7 +4094,7 @@ async function handleSafetyDocSelect(e, id){
   for(const file of files){
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this app's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -4267,7 +4324,7 @@ async function handleWeldingDocSelect(e, id){
   for(const file of files){
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this app's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -4427,7 +4484,7 @@ async function handleElevationMarkupSelect(e, jobId){
     const isImage = file.type.startsWith('image/');
     const dataUrl = isImage ? await compressImageFile(file) : await readFileAsDataURL(file);
     if(stateBytes(state) + newEntries.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     n += 1;
@@ -6559,7 +6616,7 @@ async function handleContractDocSelect(ev, jobId, docType){
     const isImage = file.type.startsWith('image/');
     const dataUrl = isImage ? await compressImageFile(file) : await readFileAsDataURL(file);
     if(stateBytes(state) + newDocs.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     const doc = { name: file.name, dataUrl, docType, uploadedBy: currentUserName||'', uploadedDate: todayStr() };
@@ -6933,7 +6990,7 @@ async function handleGanttFileSelect(e, jobId){
   const isImage = file.type.startsWith('image/');
   const dataUrl = isImage ? await compressImageFile(file) : await readFileAsDataURL(file);
   if(stateBytes(state) + dataUrl.length > MAX_STATE_BYTES){
-    alert('This file would push this job\'s stored data over the limit. Try a smaller file.');
+    storageRefused('');
     e.target.value = '';
     return;
   }
@@ -7649,7 +7706,7 @@ async function handleTaskPhotoSelect(ev, taskId){
     if(!file.type.startsWith('image/')) continue;
     const dataUrl = await compressImageFile(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert('A photo would push this job\'s stored data over the limit. Try fewer or smaller photos.');
+      storageRefused('That photo');
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:dataUrl.length});
@@ -7666,7 +7723,7 @@ async function handleTaskFileSelect(ev, taskId){
   for(const file of files){
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -8617,7 +8674,7 @@ async function handleEngineeringPhotoSelect(ev, engId){
     if(!file.type.startsWith('image/')) continue;
     const dataUrl = await compressImageFile(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert('A photo would push this job\'s stored data over the limit. Try fewer or smaller photos.');
+      storageRefused('That photo');
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:dataUrl.length});
@@ -8634,7 +8691,7 @@ async function handleEngineeringFileSelect(ev, engId){
   for(const file of files){
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -8773,7 +8830,7 @@ async function handleUnitSheetSelect(event, elevId){
   for(const file of files){
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + picked.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this app's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     picked.push({name:file.name, dataUrl, size:file.size});
@@ -9198,7 +9255,7 @@ async function handleElevationPhotoSelect(e, elevId){
     if(!file.type.startsWith('image/')) continue;
     const dataUrl = await compressImageFile(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert('A photo would push this job\'s stored data over the limit. Try fewer or smaller photos.');
+      storageRefused('That photo');
       continue;
     }
     // date/caption make this a timeline entry, not just a flat attachment —
@@ -9219,7 +9276,7 @@ async function handleElevationFileSelect(e, elevId){
   for(const file of files){
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -9638,7 +9695,7 @@ async function handleDailyReportDocSelect(e, id){
   for(const file of files){
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this app's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -10821,7 +10878,7 @@ async function handlePdfSelect(e, listId){
     const dataUrl = await readFileAsDataURL(file);
     const draftSize = draftAttachments.reduce((n,a)=>n+a.dataUrl.length,0);
     if(stateBytes(state) + draftSize + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller PDF.`);
+      storageRefused(file.name);
       continue;
     }
     draftAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -10835,7 +10892,7 @@ async function handleAnyFileSelect(e, listId){
     const dataUrl = await readFileAsDataURL(file);
     const draftSize = draftAttachments.reduce((n,a)=>n+a.dataUrl.length,0);
     if(stateBytes(state) + draftSize + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     draftAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -10869,7 +10926,7 @@ async function handleQuoteDraftFileSelect(e){
     const dataUrl = await readFileAsDataURL(file);
     const draftSize = quoteDraftAttachments.reduce((n,a)=>n+a.dataUrl.length,0);
     if(stateBytes(state) + draftSize + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     quoteDraftAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -11048,7 +11105,7 @@ async function handleDetailPdfSelect(e, coId){
     if(file.type !== 'application/pdf') continue;
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller PDF.`);
+      storageRefused(file.name);
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -11216,7 +11273,7 @@ async function handleSubmittalDocSelect(e, subId){
   for(const file of files){
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -11285,7 +11342,7 @@ async function handleInvoiceDocSelect(e, invId){
     if(file.type !== 'application/pdf') continue;
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller PDF.`);
+      storageRefused(file.name);
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -11359,7 +11416,7 @@ async function handleRfiDocSelect(e, rfiId){
   for(const file of files){
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -11420,7 +11477,7 @@ async function handleGSQuoteDocSelect(e, id){
   for(const file of files){
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:file.size});
@@ -11490,7 +11547,7 @@ async function handleProcurementDocSelect(e, id){
   for(const file of files){
     const dataUrl = await readFileAsDataURL(file);
     if(stateBytes(state) + newAttachments.reduce((n,a)=>n+a.dataUrl.length,0) + dataUrl.length > MAX_STATE_BYTES){
-      alert(`"${file.name}" would push this job's stored data over the limit. Try a smaller file.`);
+      storageRefused(file.name);
       continue;
     }
     newAttachments.push({name:file.name, dataUrl, size:file.size});
