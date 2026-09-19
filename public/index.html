@@ -172,6 +172,11 @@
   .ext-btn-primary{ border-color:var(--steel-dim); }
   .ext-btn-primary:hover{ border-color:var(--steel); background:rgba(75,156,211,0.10); }
   .ext-btn-soon{ opacity:.8; }
+  .ext-dropdown .rk-row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  .ext-dropdown .rk-steps{ margin:8px 0 0 0; padding-left:18px; font-size:12.5px; line-height:1.55; }
+  .ext-dropdown .rk-steps li{ margin-bottom:5px; }
+  .ext-dropdown code{ background:rgba(255,255,255,0.07); border-radius:4px; padding:1px 5px; font-size:11.5px; word-break:break-all; }
+  .ext-dropdown .rk-ok{ color:var(--ok, #4ade80); font-weight:600; }
   .ext-soon-badge{
     background:#384250; color:#C7CDD6; font-size:9.5px; font-weight:700; letter-spacing:.04em;
     text-transform:uppercase; padding:2px 6px; border-radius:99px; margin-left:2px;
@@ -959,6 +964,12 @@
     <button class="ext-btn ext-btn-primary" onclick="toggleExtensionInfo('bridge', this)" title="Bridge — the app your field crews and superintendents mainly use">
       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 15l6-6"/><path d="M13 5.5l1-1a3.5 3.5 0 0 1 5 5l-1 1"/><path d="M11 18.5l-1 1a3.5 3.5 0 0 1-5-5l1-1"/></svg>
       Bridge Connect
+    </button>
+  </div>
+  <div class="ext-btn-wrap">
+    <button class="ext-btn ext-btn-primary" onclick="toggleRakenPanel(this)" title="Raken — pull daily reports, field photos and checklists onto a job">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V7a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M9 13h6"/><path d="M9 16h4"/></svg>
+      Raken<span class="ext-soon-badge" id="raken-badge" hidden></span>
     </button>
   </div>
   <div class="ext-btn-wrap">
@@ -13606,6 +13617,145 @@ function closeExtensionInfo(){
   document.removeEventListener('keydown', extDropdownEscHandler);
 }
 function extDropdownEscHandler(e){ if(e.key==='Escape') closeExtensionInfo(); }
+
+/* ---- Raken. Pulls daily reports, field photos and checklists from the
+   company's Raken account onto the matching Nucleus job.
+
+   Two things are deliberately NOT here: the Raken client secret, and
+   anyone's Raken password. The whole OAuth exchange happens server-side
+   (lib/raken.js), and the sign-in itself happens on Raken's own page in a
+   popup — this file only ever asks the server for a URL to open, and hears
+   back whether it worked. Same shape as the Microsoft 365 sign-in above.
+
+   Connecting binds the whole deployment to one Raken account, so it's App
+   Manager only; the server enforces that, this just hides the button. ---- */
+let rakenState = null;   // {configured, connected, connectedAt, connectedBy, redirectUri}
+
+async function loadRakenStatus(force){
+  if(rakenState && !force) return rakenState;
+  try{
+    const res = await authFetch('/api/raken/status', {cache:'no-store'});
+    if(!res.ok) throw new Error('status ' + res.status);
+    rakenState = await res.json();
+  }catch(e){ rakenState = {configured:false, connected:false, error:true}; }
+  const badge = document.getElementById('raken-badge');
+  if(badge){
+    badge.hidden = !!rakenState.connected;
+    badge.textContent = rakenState.configured ? 'Set up' : 'Soon';
+  }
+  return rakenState;
+}
+
+function toggleRakenPanel(btn){
+  const dd = document.getElementById('ext-dropdown');
+  if(!dd) return;
+  if(!dd.hidden && dd.dataset.openFor==='raken'){ closeExtensionInfo(); return; }
+  openRakenPanel(btn);
+}
+
+async function openRakenPanel(btn){
+  const dd = document.getElementById('ext-dropdown');
+  if(!dd) return;
+  dd.dataset.openFor = 'raken';
+  dd.innerHTML = '<h4>Raken</h4><p>Checking the connection…</p>';
+  const wrap = btn.closest('.ext-btn-wrap');
+  if(wrap) dd.style.left = wrap.offsetLeft + 'px';
+  dd.hidden = false;
+  if(!document.getElementById('ext-dropdown-backdrop')){
+    const backdrop = document.createElement('div');
+    backdrop.id = 'ext-dropdown-backdrop';
+    backdrop.className = 'team-dropdown-backdrop';
+    backdrop.onclick = closeExtensionInfo;
+    document.body.appendChild(backdrop);
+  }
+  document.addEventListener('keydown', extDropdownEscHandler);
+  const st = await loadRakenStatus(true);
+  if(dd.dataset.openFor==='raken') dd.innerHTML = rakenPanelHTML(st);
+}
+
+function rakenPanelHTML(st){
+  const isManager = (getEffectiveTeamMember()||{}).role === 'App Manager';
+  if(!st.configured){
+    // Everything needed to finish setup, including the exact redirect URI to
+    // paste into Raken — that value is the usual thing to get wrong.
+    const redirect = window.location.origin + '/auth/raken/callback';
+    return `<h4>Raken — one setup step left</h4>
+      <p>Nucleus can pull daily reports, field photos and checklists from Raken onto a job. It needs a Raken OAuth app first (Account Administrator only).</p>
+      <ol class="rk-steps">
+        <li>In Raken, go to <code>app.rakenapp.com/developer/apps</code> and create an OAuth 2.0 app.</li>
+        <li>Set its redirect URI to <code>${esc(redirect)}</code></li>
+        <li>In Vercel → nucleus-vercel → Settings → Environment Variables, add <code>RAKEN_CLIENT_ID</code> and <code>RAKEN_CLIENT_SECRET</code> from that app, then redeploy.</li>
+      </ol>
+      <p style="margin-top:10px; font-size:12.5px; opacity:.85;">Paste the secret into Vercel yourself — it never needs to go anywhere else.</p>
+      <div class="rk-row"><button class="btn sm secondary" onclick="closeExtensionInfo()">Got it</button></div>`;
+  }
+  if(!st.connected){
+    return `<h4>Raken</h4>
+      <p>Not connected yet. ${isManager ? 'Connecting opens Raken\u2019s own sign-in page — your Raken password never passes through Nucleus.' : 'Ask your App Manager to connect it.'}</p>
+      <div class="rk-row">
+        ${isManager ? '<button class="btn sm" onclick="connectRaken()">Connect Raken</button>' : ''}
+        <button class="btn sm secondary" onclick="closeExtensionInfo()">Close</button>
+      </div>`;
+  }
+  const when = st.connectedAt ? new Date(st.connectedAt).toLocaleDateString() : '';
+  return `<h4>Raken</h4>
+    <p><span class="rk-ok">Connected</span>${when ? ' — since ' + esc(when) : ''}${st.connectedBy ? ' by ' + esc(st.connectedBy) : ''}.</p>
+    <p style="font-size:12.5px; opacity:.85;">Pulling daily reports, photos and checklists onto a job is the next piece — open a job and it will appear on its Documents tab.</p>
+    <div class="rk-row">
+      ${isManager ? '<button class="btn sm secondary" onclick="disconnectRaken()">Disconnect</button>' : ''}
+      <button class="btn sm secondary" onclick="closeExtensionInfo()">Close</button>
+    </div>`;
+}
+
+async function connectRaken(){
+  const dd = document.getElementById('ext-dropdown');
+  try{
+    const res = await authFetch('/api/raken/connect-url', {method:'POST'});
+    const data = await res.json();
+    if(!res.ok || !data.authorizeUrl){
+      if(dd) dd.innerHTML = `<h4>Raken</h4><p>${esc(data.message || "Couldn't start the Raken sign-in.")}</p><div class="rk-row"><button class="btn sm secondary" onclick="closeExtensionInfo()">Close</button></div>`;
+      return;
+    }
+    // Sign-in happens on Raken's page, in its own window. Nucleus only hears
+    // the result, never the credentials.
+    const popup = window.open(data.authorizeUrl, 'raken-connect', 'width=520,height=760');
+    if(dd) dd.innerHTML = '<h4>Raken</h4><p>Finish signing in to Raken in the window that opened.</p>';
+    if(!popup && dd) dd.innerHTML = '<h4>Raken</h4><p>Your browser blocked the sign-in window — allow pop-ups for this site and try Connect again.</p>';
+  }catch(e){
+    if(dd) dd.innerHTML = '<h4>Raken</h4><p>Could not reach the server to start the Raken sign-in.</p>';
+  }
+}
+
+async function disconnectRaken(){
+  const dd = document.getElementById('ext-dropdown');
+  try{
+    await authFetch('/api/raken/disconnect', {method:'POST'});
+  }catch(e){}
+  const st = await loadRakenStatus(true);
+  if(dd && dd.dataset.openFor==='raken') dd.innerHTML = rakenPanelHTML(st);
+}
+
+// The popup reports back by postMessage, same as the Microsoft sign-in.
+// Origin is checked because this listener is on the main window.
+window.addEventListener('message', async function(event){
+  if(event.origin !== window.location.origin) return;
+  const d = event.data;
+  // The Microsoft 365 sign-in popup posts to this same window, so react only
+  // to the tagged Raken payload.
+  if(!d || d.source !== 'raken') return;
+  const dd = document.getElementById('ext-dropdown');
+  if(!dd || dd.dataset.openFor !== 'raken'){
+    // Panel already closed — just refresh the badge quietly.
+    if(d.ok) loadRakenStatus(true);
+    return;
+  }
+  if(d.ok){
+    const st = await loadRakenStatus(true);
+    if(dd) dd.innerHTML = rakenPanelHTML(st);
+  }else if(dd){
+    dd.innerHTML = `<h4>Raken</h4><p>${esc(d.error || 'That sign-in did not complete.')}</p><div class="rk-row"><button class="btn sm" onclick="connectRaken()">Try again</button><button class="btn sm secondary" onclick="closeExtensionInfo()">Close</button></div>`;
+  }
+});
 
 /* ---- Team dropdown: anchored under the top-bar "Team" button instead of
    sitting inline on the home screen. Content (role tiers + add-member form)
