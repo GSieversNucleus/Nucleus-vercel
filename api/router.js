@@ -23,6 +23,7 @@ const roles = require('../lib/roles');
 const webpush = require('../lib/webpush');
 const { geocodeAddress } = require('../lib/geocode');
 const { postToTeamsWebhook } = require('../lib/teamsWebhook');
+const blob = require('../lib/blob');
 
 const MAX_BODY_BYTES = 20 * 1024 * 1024; // 20MB — matches the app's own MAX_STATE_BYTES headroom
 
@@ -308,6 +309,81 @@ module.exports = async (req, res) => {
       const token = getBearerToken(req);
       if (token) await store.deleteSession(token);
       return sendJSON(res, 200, { ok: true });
+    }
+
+    // ---- Attachment storage (Vercel Blob). See lib/blob.js for WHY this
+    // exists: attachments used to be inlined into the state document, and
+    // Vercel's ~4.5MB request-body cap therefore doubled as a hard ceiling on
+    // every photo and PDF in the app combined. Files now go browser ->
+    // private Blob store directly; these routes only ever hand out
+    // short-lived presigned URLs, never file bytes.
+    //
+    // Every route is behind the same bearer gate as the rest of the app. That
+    // gate is the ONLY thing standing between the open internet and write
+    // access to the store, so it is checked first, before anything is parsed.
+    // ----
+    if (url === '/api/blob/status' && req.method === 'GET') {
+      if (!(await store.getSession(getBearerToken(req)))) return sendJSON(res, 401, { error: 'not_authenticated' });
+      return sendJSON(res, 200, { enabled: blob.isConfigured(), maxFileBytes: blob.MAX_FILE_BYTES });
+    }
+
+    if (url === '/api/blob/sign-upload' && req.method === 'POST') {
+      if (!(await store.getSession(getBearerToken(req)))) return sendJSON(res, 401, { error: 'not_authenticated' });
+      if (!blob.isConfigured()) return sendJSON(res, 503, { error: 'blob_not_configured' });
+      let body;
+      try { body = await readJSONBody(req); }
+      catch (e) { return sendJSON(res, e.code === 'too_large' ? 413 : 400, { error: e.code || 'bad_request' }); }
+      const size = Number(body.size) || 0;
+      if (size > blob.MAX_FILE_BYTES) {
+        return sendJSON(res, 413, { error: 'file_too_large', maxFileBytes: blob.MAX_FILE_BYTES });
+      }
+      const pathname = blob.makePathname(body.name);
+      try {
+        const signed = await blob.signUpload(pathname);
+        return sendJSON(res, 200, { pathname, uploadUrl: signed.uploadUrl, expiresAt: signed.expiresAt });
+      } catch (e) {
+        console.error('blob sign-upload failed', e);
+        return sendJSON(res, 502, { error: 'blob_unavailable' });
+      }
+    }
+
+    if (url === '/api/blob/sign-reads' && req.method === 'POST') {
+      if (!(await store.getSession(getBearerToken(req)))) return sendJSON(res, 401, { error: 'not_authenticated' });
+      if (!blob.isConfigured()) return sendJSON(res, 503, { error: 'blob_not_configured' });
+      let body;
+      try { body = await readJSONBody(req); }
+      catch (e) { return sendJSON(res, e.code === 'too_large' ? 413 : 400, { error: e.code || 'bad_request' }); }
+      // Capped so one render of a very large job can't ask for thousands of
+      // signatures in a single request; the client batches past this itself.
+      const pathnames = (Array.isArray(body.pathnames) ? body.pathnames : [])
+        .filter((p) => typeof p === 'string' && p)
+        .slice(0, 200);
+      if (!pathnames.length) return sendJSON(res, 200, { urls: {}, expiresAt: Date.now() });
+      try {
+        const signed = await blob.signReads(pathnames);
+        return sendJSON(res, 200, signed);
+      } catch (e) {
+        console.error('blob sign-reads failed', e);
+        return sendJSON(res, 502, { error: 'blob_unavailable' });
+      }
+    }
+
+    if (url === '/api/blob/delete' && req.method === 'POST') {
+      if (!(await store.getSession(getBearerToken(req)))) return sendJSON(res, 401, { error: 'not_authenticated' });
+      if (!blob.isConfigured()) return sendJSON(res, 503, { error: 'blob_not_configured' });
+      let body;
+      try { body = await readJSONBody(req); }
+      catch (e) { return sendJSON(res, e.code === 'too_large' ? 413 : 400, { error: e.code || 'bad_request' }); }
+      const pathnames = (Array.isArray(body.pathnames) ? body.pathnames : [])
+        .filter((p) => typeof p === 'string' && p)
+        .slice(0, 200);
+      // Non-fatal by design: the state document has already dropped its
+      // reference by the time this is called, so a failed cleanup leaves an
+      // orphan, not a broken app.
+      let deleted = 0;
+      try { deleted = await blob.deleteBlobs(pathnames); }
+      catch (e) { console.error('blob delete failed', e); }
+      return sendJSON(res, 200, { ok: true, deleted });
     }
 
     // ---- Microsoft Entra ID (Azure AD) sign-in — identical to the Render
